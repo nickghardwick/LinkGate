@@ -1,0 +1,267 @@
+import AppKit
+import XCTest
+@testable import LinkGate
+
+// Acceptance Contract mapping:
+// A5: Default-browser status checks both HTTP and HTTPS through public workspace APIs. A request
+// targets LinkGate explicitly, performs HTTP before HTTPS, stops after a failure, and reports one
+// completion. These tests exercise the workspace adapter seam rather than macOS global defaults.
+@MainActor
+final class DefaultBrowserServiceTests: XCTestCase {
+    func testStatusLooksUpBothSchemesAndReportsDefaultOnlyWhenLinkGateHandlesEach() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let httpBrowserURL = URL(fileURLWithPath: "/Applications/HTTP Browser.app")
+        let httpsBrowserURL = URL(fileURLWithPath: "/Applications/HTTPS Browser.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: [
+                "http": httpBrowserURL,
+                "https": httpsBrowserURL,
+            ],
+            bundleIdentifiers: [
+                httpBrowserURL: "com.example.LinkGate",
+                httpsBrowserURL: "com.example.LinkGate",
+            ]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+
+        let status = service.status()
+
+        XCTAssertEqual(workspace.lookupSchemes, ["http", "https"])
+        XCTAssertTrue(status.httpIsDefault)
+        XCTAssertTrue(status.httpsIsDefault)
+        XCTAssertTrue(status.isDefault)
+        XCTAssertTrue(workspace.setDefaultCalls.isEmpty)
+    }
+
+    func testStatusTreatsMissingOrWrongResolvedApplicationAsNotDefault() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let otherURL = URL(fileURLWithPath: "/Applications/Other.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": otherURL],
+            bundleIdentifiers: [otherURL: "com.example.other"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+
+        let status = service.status()
+
+        XCTAssertEqual(workspace.lookupSchemes, ["http", "https"])
+        XCTAssertEqual(status, DefaultBrowserStatus(httpIsDefault: false, httpsIsDefault: false))
+    }
+
+    func testRequestSetsHTTPThenHTTPSAndCompletesAfterBothSucceed() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake()
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+        var result: Result<Void, Error>?
+
+        service.requestDefault { result = $0 }
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http"])
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.applicationURL), [linkGateURL])
+        XCTAssertNil(result)
+
+        workspace.completeSetDefault(forScheme: "http", error: nil)
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http", "https"])
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.applicationURL), [linkGateURL, linkGateURL])
+        XCTAssertNil(result)
+
+        workspace.completeSetDefault(forScheme: "https", error: nil)
+
+        switch result {
+        case .success:
+            break
+        default:
+            XCTFail("Expected success after both scheme requests succeed, got \(String(describing: result)).")
+        }
+    }
+
+    func testRequestStopsAfterHTTPFailureAndForwardsOneFailure() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake()
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+        var result: Result<Void, Error>?
+        let expectedError = NSError(domain: "LinkGateTests", code: 7)
+
+        service.requestDefault { result = $0 }
+        workspace.completeSetDefault(forScheme: "http", error: expectedError)
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http"])
+        switch result {
+        case let .failure(error):
+            XCTAssertEqual(error as NSError, expectedError)
+        default:
+            XCTFail("Expected HTTP failure, got \(String(describing: result)).")
+        }
+    }
+
+    func testRequestStopsAfterHTTPSFailureAndDoesNotReportSuccess() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake()
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+        var result: Result<Void, Error>?
+        let expectedError = NSError(domain: "LinkGateTests", code: 8)
+
+        service.requestDefault { result = $0 }
+        workspace.completeSetDefault(forScheme: "http", error: nil)
+        workspace.completeSetDefault(forScheme: "https", error: expectedError)
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http", "https"])
+        switch result {
+        case let .failure(error):
+            XCTAssertEqual(error as NSError, expectedError)
+        default:
+            XCTFail("Expected HTTPS failure, got \(String(describing: result)).")
+        }
+    }
+
+    func testHTTPRequestCompletingWithBothSchemesOwnedCompletesWithoutRedundantHTTPSRequest() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let otherURL = URL(fileURLWithPath: "/Applications/Other.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": otherURL, "https": otherURL],
+            bundleIdentifiers: [otherURL: "com.example.other"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+        var result: Result<Void, Error>?
+
+        service.requestDefault { result = $0 }
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http"])
+
+        workspace.applicationsToOpen = ["http": linkGateURL, "https": linkGateURL]
+        workspace.bundleIdentifiers = [linkGateURL: "com.example.LinkGate"]
+        workspace.completeSetDefault(forScheme: "http", error: nil)
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http"])
+        switch result {
+        case .success:
+            break
+        default:
+            XCTFail("Expected success when the HTTP request also makes HTTPS default, got \(String(describing: result)).")
+        }
+    }
+
+    func testRequestSkipsAlreadyDefaultHTTPAndRequestsOnlyHTTPS() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let otherURL = URL(fileURLWithPath: "/Applications/Other.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": linkGateURL, "https": otherURL],
+            bundleIdentifiers: [
+                linkGateURL: "com.example.LinkGate",
+                otherURL: "com.example.other",
+            ]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+        var result: Result<Void, Error>?
+
+        service.requestDefault { result = $0 }
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["https"])
+        workspace.completeSetDefault(forScheme: "https", error: nil)
+
+        switch result {
+        case .success:
+            break
+        default:
+            XCTFail("Expected success after requesting the only non-default scheme, got \(String(describing: result)).")
+        }
+    }
+
+    func testRequestCompletesImmediatelyWhenBothSchemesAlreadyUseLinkGate() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": linkGateURL, "https": linkGateURL],
+            bundleIdentifiers: [linkGateURL: "com.example.LinkGate"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+        var result: Result<Void, Error>?
+
+        service.requestDefault { result = $0 }
+
+        XCTAssertTrue(workspace.setDefaultCalls.isEmpty)
+        switch result {
+        case .success:
+            break
+        default:
+            XCTFail("Expected immediate success when LinkGate already handles both schemes, got \(String(describing: result)).")
+        }
+    }
+}
+
+@MainActor
+private final class DefaultBrowserWorkspaceFake: DefaultBrowserWorkspace {
+    struct SetDefaultCall {
+        let applicationURL: URL
+        let scheme: String
+    }
+
+    var applicationsToOpen: [String: URL]
+    var bundleIdentifiers: [URL: String]
+    private(set) var lookupSchemes: [String] = []
+    private(set) var setDefaultCalls: [SetDefaultCall] = []
+    private var completions: [String: (Error?) -> Void] = [:]
+
+    init(
+        applicationsToOpen: [String: URL] = [:],
+        bundleIdentifiers: [URL: String] = [:]
+    ) {
+        self.applicationsToOpen = applicationsToOpen
+        self.bundleIdentifiers = bundleIdentifiers
+    }
+
+    func applicationURL(toOpen url: URL) -> URL? {
+        let scheme = url.scheme ?? ""
+        lookupSchemes.append(scheme)
+        return applicationsToOpen[scheme]
+    }
+
+    func bundleIdentifier(at url: URL) -> String? {
+        bundleIdentifiers[url]
+    }
+
+    func setDefaultApplication(
+        at url: URL,
+        forScheme scheme: String,
+        completion: @escaping (Error?) -> Void
+    ) {
+        setDefaultCalls.append(SetDefaultCall(applicationURL: url, scheme: scheme))
+        completions[scheme] = completion
+    }
+
+    func completeSetDefault(forScheme scheme: String, error: Error?) {
+        let completion = completions.removeValue(forKey: scheme)
+        completion?(error)
+    }
+}

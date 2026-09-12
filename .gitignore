@@ -1,0 +1,37 @@
+# Xcode
+DerivedData/
+build/
+dist/
+.linkgate-release-final.*/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Local development and process material
+.scratch/
+.agents/
+.superpowers/
+skills-lock.json
+docs/
+scripts/release/tests/release-docs-tests.sh
+
+# Local environment and signing exports
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.p8
+*.mobileprovision
+
+# Misc
+*.swp
+.worktrees/

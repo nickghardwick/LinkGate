@@ -1,0 +1,2 @@
+LinkGate.app
+Applications -> /Applications

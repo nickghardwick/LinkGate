@@ -1,0 +1,16 @@
+{
+  "product": "LinkGate",
+  "marketing_version": "0.1.0",
+  "build": "1",
+  "bundle_id": "com.nickghardwick.LinkGate",
+  "source_commit": "0123456789abcdef0123456789abcdef01234567",
+  "architectures": ["arm64", "x86_64"],
+  "deployment_target": "14.0",
+  "signing_identity": "Developer ID Application: LinkGate (Z8A8ZWCZ45)",
+  "notarized": true,
+  "stapled": true,
+  "xcode_version": "Xcode 26.6",
+  "macos_version": "26.5",
+  "artifact_name": "LinkGate-0.1.0.dmg",
+  "sha256": "190c6196218b88c15d65ff286963b5829cad57bf25c8ae8ec0b46e3d15cd80ed"
+}

@@ -1,0 +1,15 @@
+[
+  {
+    "action": "build",
+    "target": "LinkGate",
+    "buildSettings": {
+      "PRODUCT_NAME": "LinkGate",
+      "MARKETING_VERSION": "0.1.0",
+      "CURRENT_PROJECT_VERSION": "1",
+      "PRODUCT_BUNDLE_IDENTIFIER": "com.nickghardwick.LinkGate",
+      "ARCHS": "arm64 x86_64",
+      "MACOSX_DEPLOYMENT_TARGET": "14.0",
+      "CODE_SIGN_IDENTITY": "Developer ID Application"
+    }
+  }
+]

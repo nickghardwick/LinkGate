@@ -47,6 +47,7 @@ def stage_staged_draft_content(
         expected_previous_pages_tip,
         pages_git,
         runner or SubprocessRunner(),
+        existing_feed=existing_appcast is not None,
     )
 
 

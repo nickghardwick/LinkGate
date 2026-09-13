@@ -348,8 +348,6 @@ class DefaultPagesSource:
         if len(lines) > 1:
             raise PublicationError(FailureClass.REPOSITORY, "gh-pages tip inspection returned multiple refs")
         tip = lines[0] if lines else None
-        if tip is not None and existing_appcast is None:
-            raise PublicationError(FailureClass.APPCAST, "gh-pages exists but its appcast is unavailable")
         return PagesSourceState(existing_appcast, tip)
 
 

@@ -334,6 +334,49 @@ class PagesTests(unittest.TestCase):
             finally:
                 shutil.rmtree(workspace.workspace)
 
+    def test_existing_bootstrap_pages_without_appcast_stages_first_feed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            remote = root / "remote"
+            remote.mkdir()
+            subprocess.run(["git", "init", "--initial-branch", "gh-pages"], cwd=remote, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=LinkGate", "-c", "user.email=linkgate@users.noreply.github.com", "commit", "--allow-empty", "-m", "Bootstrap GitHub Pages"], cwd=remote, check=True, capture_output=True)
+            tip = subprocess.run(["git", "rev-parse", "HEAD"], cwd=remote, text=True, capture_output=True, check=True).stdout.strip()
+            config = self.write_config(root)
+            appcast = serialize_appcast(AppcastFeed("Beta", "https://github.com/example/linkgate", "Updates", (item("0.1.4", "6"),)))
+            workspace = stage_pages(
+                config, appcast, b"new notes", "0.1.4", "6", "2026-09-12T12:30:00Z", tip,
+                LocalPagesGit(SubprocessRunner(), str(remote)), existing_feed=False,
+            )
+            try:
+                changed = subprocess.run(["git", "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"], cwd=workspace.workspace, text=True, capture_output=True, check=True).stdout.splitlines()
+                self.assertEqual(sorted(changed), ["A\tupdates/appcast.xml", "A\tupdates/releases/0.1.4.html"])
+                self.assertEqual(subprocess.run(["git", "rev-list", "--parents", "-n", "1", "HEAD^"], cwd=workspace.workspace, text=True, capture_output=True, check=True).stdout.strip(), tip)
+            finally:
+                shutil.rmtree(workspace.workspace)
+
+    def test_bootstrap_infrastructure_file_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            remote = root / "remote"
+            remote.mkdir()
+            subprocess.run(["git", "init", "--initial-branch", "gh-pages"], cwd=remote, check=True, capture_output=True)
+            (remote / ".nojekyll").write_text("", encoding="utf-8")
+            subprocess.run(["git", "add", ".nojekyll"], cwd=remote, check=True, capture_output=True)
+            subprocess.run(["git", "-c", "user.name=LinkGate", "-c", "user.email=linkgate@users.noreply.github.com", "commit", "-m", "Bootstrap GitHub Pages"], cwd=remote, check=True, capture_output=True)
+            tip = subprocess.run(["git", "rev-parse", "HEAD"], cwd=remote, text=True, capture_output=True, check=True).stdout.strip()
+            config = self.write_config(root)
+            appcast = serialize_appcast(AppcastFeed("Beta", "https://github.com/example/linkgate", "Updates", (item("0.1.4", "6"),)))
+            workspace = stage_pages(
+                config, appcast, b"new notes", "0.1.4", "6", "2026-09-12T12:30:00Z", tip,
+                LocalPagesGit(SubprocessRunner(), str(remote)), existing_feed=False,
+            )
+            try:
+                self.assertTrue((workspace.workspace / ".nojekyll").is_file())
+                self.assertEqual((workspace.workspace / ".nojekyll").read_bytes(), b"")
+            finally:
+                shutil.rmtree(workspace.workspace)
+
     def test_existing_release_note_path_is_never_replaced(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

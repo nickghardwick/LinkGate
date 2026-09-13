@@ -73,11 +73,17 @@ def _files(root: Path) -> dict[str, bytes]:
     return result
 
 
-def _expected_changes(before: dict[str, bytes], after: dict[str, bytes], version: str, bootstrap: bool) -> dict[str, str]:
+def _expected_changes(
+    before: dict[str, bytes],
+    after: dict[str, bytes],
+    version: str,
+    bootstrap: bool,
+    existing_feed: bool,
+) -> dict[str, str]:
     appcast = "updates/appcast.xml"
     notes = f"updates/releases/{version}.html"
     changed = {path for path in set(before) | set(after) if before.get(path) != after.get(path)}
-    expected = {appcast: "A" if bootstrap else "M", notes: "A"}
+    expected = {appcast: "M" if existing_feed else "A", notes: "A"}
     if changed != set(expected):
         raise PublicationError(FailureClass.REPOSITORY, "Pages staging changed paths outside the LinkGate update site")
     for path, status in expected.items():
@@ -99,11 +105,13 @@ def stage_pages(
     pages_git: PagesGit,
     runner: CommandRunner | None = None,
     workspace_factory=tempfile.mkdtemp,
+    existing_feed: bool | None = None,
 ) -> PagesStageResult:
     command_runner = runner or SubprocessRunner()
     parse_appcast(appcast_xml)
     workspace = Path(workspace_factory(prefix="linkgate-pages-"))
     bootstrap = expected_previous_tip is None
+    feed_exists = (not bootstrap) if existing_feed is None else existing_feed
     try:
         pages_git.prepare(workspace, expected_previous_tip, config.pages_branch)
         before = _files(workspace)
@@ -114,7 +122,7 @@ def stage_pages(
         appcast_path.write_bytes(appcast_xml)
         notes_path.write_bytes(release_notes_html)
         after = _files(workspace)
-        expected = _expected_changes(before, after, version, bootstrap)
+        expected = _expected_changes(before, after, version, bootstrap, feed_exists)
 
         add = command_runner.run(["git", "add", "--", "updates/appcast.xml", f"updates/releases/{version}.html"], cwd=workspace)
         if add.returncode != 0:

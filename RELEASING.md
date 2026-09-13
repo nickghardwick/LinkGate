@@ -105,12 +105,16 @@ absent feed creates the first item, while an existing feed keeps its historical
 items and ordering. The appcast points to the exact versioned GitHub Release
 DMG URL and uses the single Step 7D publication timestamp.
 
-Pages staging uses an isolated local checkout. An existing `gh-pages` tip is
-checked against the expected commit; first publication creates an orphan
-history. The local commit contains only `updates/appcast.xml` and the new
-versioned release-note page, with subject `Publish LinkGate <version> update
-feed`. The staging component itself does not push Pages; `make publish-beta`
-performs the final fast-forward push only after the GitHub prerelease is public.
+Pages uses a dedicated `gh-pages` branch configured in GitHub as “Deploy from a
+branch” at the repository root. Setup creates one empty orphan commit with
+subject `Bootstrap GitHub Pages` so the Pages source can be configured before
+the first release. The first publication stages its update as a child of that
+commit; later publications continue from the existing feed history. A
+`.nojekyll` infrastructure file, if present, is preserved. Each local
+publication commit contains only `updates/appcast.xml` and the new versioned
+release-note page, with subject `Publish LinkGate <version> update feed`. The
+staging component itself does not push Pages; `make publish-beta` performs the
+final fast-forward push only after the GitHub prerelease is public.
 
 ## Full beta publication
 

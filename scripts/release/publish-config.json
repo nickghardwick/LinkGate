@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "repository": "OWNER/REPO",
+  "product": "LinkGate",
+  "bundle_id": "com.nickghardwick.LinkGate",
+  "team_id": "Z8A8ZWCZ45",
+  "appcast_path": "/updates/appcast.xml",
+  "release_notes_source_pattern": "release-notes/{version}.md",
+  "release_notes_url_pattern": "https://{owner}.github.io/{repo}/updates/releases/{version}.html",
+  "appcast_url_pattern": "https://{owner}.github.io/{repo}/updates/appcast.xml",
+  "github_release": {
+    "tag_pattern": "v{version}",
+    "title_pattern": "LinkGate {version}",
+    "prerelease": true
+  },
+  "sparkle": {
+    "version": "2.9.6",
+    "public_key": "REPLACE_AFTER_ONE_TIME_KEY_SETUP",
+    "distribution": {
+      "archive_name": "Sparkle-2.9.6.tar.xz",
+      "archive_url": "https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-2.9.6.tar.xz",
+      "archive_sha256": "52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192",
+      "sign_update_path": "bin/sign_update",
+      "sign_update_sha256": "bfb52400c3da18bb4c251ac4818c2c2e1e31c2e649a45b31c11109b6e57b34ad"
+    }
+  },
+  "verification": {
+    "attempts": 18,
+    "interval_seconds": 10
+  },
+  "minimum_macos_version": "14.0",
+  "pages": {
+    "branch": "gh-pages",
+    "commit_author_name": "LinkGate",
+    "commit_author_email": "linkgate@users.noreply.github.com"
+  }
+}

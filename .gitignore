@@ -3,6 +3,7 @@ DerivedData/
 build/
 dist/
 .linkgate-release-final.*/
+.linkgate-publish.lock
 *.xcuserstate
 xcuserdata/
 *.xcscmblueprint
@@ -16,6 +17,8 @@ xcuserdata/
 .swiftpm/
 
 # Local development and process material
+.venv/
+__pycache__/
 .scratch/
 .agents/
 .superpowers/

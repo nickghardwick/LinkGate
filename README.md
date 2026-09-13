@@ -40,6 +40,14 @@ run` builds and opens the Debug app for local testing.
 `make test` runs the native XCTest target. `make verify` runs the build, XCTest,
 and deterministic release checks; it is the authoritative verification path.
 
+The repository also contains the beta publication pipeline. Set it up with
+`./scripts/release/setup-publish-env.sh`, then run `make publish-beta-tests`.
+See [`RELEASING.md`](RELEASING.md) for the public release-tooling setup and
+publication sequence. `make publish-beta-check` is the read-only readiness
+check, while `make publish-beta` is the explicit public publication command.
+The current `0.1.3 (5)` release remains validation evidence only; publication
+also requires resolved infrastructure and a fresh publishable Step 6 release.
+
 Build output is written to `build/DerivedData/`. It is generated locally and
 is excluded from version control.
 

@@ -7,7 +7,7 @@ MACOS_DESTINATION := platform=macOS,arch=$(HOST_ARCH)
 
 XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIGURATION) -destination '$(MACOS_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH)
 
-.PHONY: build test verify release-tests run release
+.PHONY: build test verify release-tests publish-beta-tests publish-beta-check publish-beta run release
 
 build:
 	$(XCODEBUILD) build
@@ -26,6 +26,7 @@ verify:
 	./scripts/release/tests/release-preflight-tests.sh || status=$$?; \
 	./scripts/release/tests/release-workflow-tests.sh || status=$$?; \
 	./scripts/release/tests/release-interface-tests.sh || status=$$?; \
+	./scripts/release/tests/publish-beta-tests.sh || status=$$?; \
 	exit $$status
 
 release-tests:
@@ -33,6 +34,16 @@ release-tests:
 	./scripts/release/tests/release-preflight-tests.sh
 	./scripts/release/tests/release-workflow-tests.sh
 	./scripts/release/tests/release-interface-tests.sh
+	./scripts/release/tests/publish-beta-tests.sh
+
+publish-beta-tests:
+	./scripts/release/tests/publish-beta-tests.sh
+
+publish-beta-check:
+	./scripts/release/publish-beta-check.sh
+
+publish-beta:
+	./scripts/release/publish-beta.sh
 
 release:
 	./scripts/release/release.sh

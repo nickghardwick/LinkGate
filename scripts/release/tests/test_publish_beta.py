@@ -124,13 +124,13 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(PublicationError):
             load_config(self.write_config(value))
 
-    def test_committed_config_is_fail_closed_until_operator_setup(self) -> None:
+    def test_committed_config_contains_configured_public_repository_and_key(self) -> None:
         config_path = Path(__file__).resolve().parents[1] / "publish-config.json"
 
-        with self.assertRaises(PublicationError) as raised:
-            load_config(config_path)
+        config = load_config(config_path)
 
-        self.assertEqual(raised.exception.failure_class, FailureClass.CONFIGURATION)
+        self.assertEqual(config.repository, "nickghardwick/LinkGate")
+        self.assertEqual(config.sparkle_public_key, "En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU=")
 
     def test_release_notes_source_path_is_version_specific(self) -> None:
         config = load_config(self.write_config(valid_config()))

@@ -15,7 +15,7 @@
   },
   "sparkle": {
     "version": "2.9.6",
-    "public_key": "REPLACE_AFTER_ONE_TIME_KEY_SETUP",
+    "public_key": "En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU=",
     "distribution": {
       "archive_name": "Sparkle-2.9.6.tar.xz",
       "archive_url": "https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-2.9.6.tar.xz",

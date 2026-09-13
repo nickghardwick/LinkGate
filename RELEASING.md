@@ -20,10 +20,9 @@ The environment installs the exact dependency pin in
 is ignored. Normal verification never installs or updates packages.
 
 Publication constants are kept in
-`scripts/release/publish-config.json`. The file currently contains deliberately
-invalid placeholders for the future GitHub repository and Sparkle public key;
-foundation code rejects those values. No credentials or private keys belong in
-the repository.
+`scripts/release/publish-config.json`. The canonical repository and production
+Sparkle public key are configured there. No credentials or private keys belong
+in the repository.
 
 Future public release notes use the tracked convention
 `release-notes/<MARKETING_VERSION>.md`. A release-note file must be committed
@@ -50,10 +49,10 @@ blocking categories and reasons. The check does not create refs or releases,
 write Pages, sign archives, install dependencies, rebuild the app, or modify
 `dist/`.
 
-The committed configuration intentionally remains unresolved until the
-operator creates the real repository and establishes the Sparkle identity.
 The current `0.1.3 (5)` artifact also remains validation evidence only because
-its source commit has no committed versioned release notes.
+its source commit has no committed versioned release notes. A future publishable
+release must use a fresh Step 6 artifact from the source commit containing its
+matching release notes.
 
 The staging core used by later pipeline composition consumes a successful
 preflight, creates one unsigned annotated version tag, pushes that tag
@@ -115,6 +114,14 @@ publication commit contains only `updates/appcast.xml` and the new versioned
 release-note page, with subject `Publish LinkGate <version> update feed`. The
 staging component itself does not push Pages; `make publish-beta` performs the
 final fast-forward push only after the GitHub prerelease is public.
+
+## Production Sparkle identity
+
+The production Sparkle Ed25519 private key is stored in the macOS Keychain
+under the LinkGate account. The matching public key is committed in the
+publication configuration. Maintain an additional secure backup created with
+Sparkle's `generate_keys -x` export workflow outside the repository. Do not
+print, commit, or pass the private key on a command line.
 
 ## Full beta publication
 

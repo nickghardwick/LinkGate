@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "repository": "OWNER/REPO",
+  "repository": "nickghardwick/LinkGate",
   "product": "LinkGate",
   "bundle_id": "com.nickghardwick.LinkGate",
   "team_id": "Z8A8ZWCZ45",

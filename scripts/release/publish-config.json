@@ -15,6 +15,7 @@
   },
   "sparkle": {
     "version": "2.9.6",
+    "keychain_account": "LinkGate",
     "public_key": "En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU=",
     "distribution": {
       "archive_name": "Sparkle-2.9.6.tar.xz",

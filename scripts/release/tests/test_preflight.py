@@ -41,6 +41,7 @@ def config_value(repository="example/linkgate", public_key=PUBLIC_KEY):
         "github_release": {"tag_pattern": "v{version}", "title_pattern": "LinkGate {version}", "prerelease": True},
         "sparkle": {
             "version": "2.9.6",
+            "keychain_account": "LinkGate",
             "public_key": public_key,
             "distribution": {
                 "archive_name": "Sparkle-2.9.6.tar.xz",

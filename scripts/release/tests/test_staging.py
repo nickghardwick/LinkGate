@@ -13,7 +13,7 @@ from pathlib import Path
 from scripts.release.publish_beta.appcast import AppcastFeed, AppcastItem, parse_appcast, serialize_appcast
 from scripts.release.publish_beta.config import load_config
 from scripts.release.publish_beta.content import merge_appcast, prepare_publication_content
-from scripts.release.publish_beta.errors import PublicationError
+from scripts.release.publish_beta.errors import FailureClass, PublicationError
 from scripts.release.publish_beta.models import AssetFact, PublicationRecord
 from scripts.release.publish_beta.pages import LocalPagesGit, stage_pages
 from scripts.release.publish_beta.preflight import CommandResult, SubprocessRunner
@@ -46,7 +46,7 @@ def config_value() -> dict:
         "appcast_url_pattern": "https://{owner}.github.io/{repo}/updates/appcast.xml",
         "github_release": {"tag_pattern": "v{version}", "title_pattern": "LinkGate {version}", "prerelease": True},
         "sparkle": {
-            "version": "2.9.6", "public_key": PUBLIC_KEY,
+            "version": "2.9.6", "keychain_account": "LinkGate", "public_key": PUBLIC_KEY,
             "distribution": {"archive_name": "Sparkle-2.9.6.tar.xz", "archive_url": "https://github.com/sparkle-project/Sparkle/releases/download/2.9.6/Sparkle-2.9.6.tar.xz", "archive_sha256": "a" * 64, "sign_update_path": "bin/sign_update", "sign_update_sha256": "b" * 64},
         },
         "verification": {"attempts": 2, "interval_seconds": 0},
@@ -166,12 +166,30 @@ class SparkleOutputTests(unittest.TestCase):
             archive.write_bytes(b"0123456789ab")
             runner = Runner()
             signature = SparkleSignature("A" * 86 + "==", 12)
-            SparkleSignatureVerifier(runner, "/sparkle/bin/sign_update", "/usr/bin/openssl").verify(archive, signature, PUBLIC_KEY)
+            SparkleSignatureVerifier(
+                runner, "/sparkle/bin/sign_update", "/usr/bin/openssl", account="LinkGate"
+            ).verify(archive, signature, PUBLIC_KEY)
             self.assertEqual(len(runner.calls), 2)
             self.assertIn("--verify", runner.calls[0])
             self.assertEqual(runner.calls[0][0], "/sparkle/bin/sign_update")
+            self.assertEqual(runner.calls[0][1:3], ("--account", "LinkGate"))
             self.assertEqual(runner.calls[1][0], "/usr/bin/openssl")
             self.assertNotIn("--ed-key-file", runner.calls[0])
+
+    def test_wrong_keychain_account_is_reported_as_a_controlled_tool_failure(self) -> None:
+        class Runner:
+            def run(self, args, cwd=None):
+                return CommandResult(1, "", "account not found")
+
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "update.dmg"
+            archive.write_bytes(b"fixture")
+            with self.assertRaises(PublicationError) as raised:
+                SignUpdateAdapter(
+                    Runner(), "/sparkle/bin/sign_update", account="WrongAccount"
+                ).sign(archive)
+
+        self.assertEqual(raised.exception.failure_class, FailureClass.TOOLING)
 
     def test_malformed_signer_output_is_rejected(self) -> None:
         with self.assertRaises(PublicationError):

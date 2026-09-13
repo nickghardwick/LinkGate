@@ -357,10 +357,13 @@ class DefaultContentStager:
         self.tools = tools
 
     def stage(self, repo_root: Path, config_path: Path, staged: MutationResult, source: PagesSourceState) -> PagesStageResult:
+        config = load_config(config_path)
         sign_update = self.tools.find("sign_update") or "sign_update"
         openssl = self.tools.find("openssl") or "openssl"
-        signer = SignUpdateAdapter(self.runner, sign_update)
-        verifier = SparkleSignatureVerifier(self.runner, sign_update, openssl)
+        signer = SignUpdateAdapter(self.runner, sign_update, account=config.sparkle_keychain_account)
+        verifier = SparkleSignatureVerifier(
+            self.runner, sign_update, openssl, account=config.sparkle_keychain_account
+        )
         pages_git = LocalPagesGit(self.runner, f"https://github.com/{staged.publication_record.github_repository}.git")
         return stage_staged_draft_content(
             repo_root, config_path, staged, signer, verifier, pages_git,

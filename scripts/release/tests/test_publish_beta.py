@@ -49,6 +49,7 @@ def valid_config() -> dict:
         },
         "sparkle": {
             "version": "2.9.6",
+            "keychain_account": "LinkGate",
             "public_key": PUBLIC_KEY,
             "distribution": {
                 "archive_name": "Sparkle-2.9.6.tar.xz",
@@ -97,6 +98,7 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(config.repository, "example/linkgate")
         self.assertEqual(config.sparkle_version, "2.9.6")
+        self.assertEqual(config.sparkle_keychain_account, "LinkGate")
         self.assertEqual(config.release_notes_url("0.1.3"), "https://example.github.io/linkgate/updates/releases/0.1.3.html")
         self.assertEqual(config.appcast_url(), "https://example.github.io/linkgate/updates/appcast.xml")
 
@@ -117,6 +119,13 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(PublicationError):
             load_config(self.write_config(value))
 
+    def test_rejects_unresolved_sparkle_keychain_account(self) -> None:
+        value = valid_config()
+        value["sparkle"]["keychain_account"] = "REPLACE_AFTER_ONE_TIME_ACCOUNT_SETUP"
+
+        with self.assertRaises(PublicationError):
+            load_config(self.write_config(value))
+
     def test_rejects_unpinned_sparkle_distribution_provenance(self) -> None:
         value = valid_config()
         value["sparkle"]["distribution"]["archive_url"] = "https://github.com/sparkle-project/Sparkle/releases/download/2.9.5/Sparkle-2.9.5.tar.xz"
@@ -130,6 +139,7 @@ class ConfigTests(unittest.TestCase):
         config = load_config(config_path)
 
         self.assertEqual(config.repository, "nickghardwick/LinkGate")
+        self.assertEqual(config.sparkle_keychain_account, "LinkGate")
         self.assertEqual(config.sparkle_public_key, "En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU=")
 
     def test_release_notes_source_path_is_version_specific(self) -> None:

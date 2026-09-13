@@ -7,6 +7,7 @@ from pathlib import Path
 from dataclasses import replace
 import hashlib
 import json
+from unittest.mock import patch
 
 from scripts.release.publish_beta.appcast import AppcastFeed, serialize_appcast
 from scripts.release.publish_beta.config import load_config
@@ -18,6 +19,7 @@ from scripts.release.publish_beta.orchestrator import (
     OrchestrationDependencies,
     DefaultPagesPusher,
     DefaultPublicVerifier,
+    DefaultContentStager,
     LocalEvidenceWriter,
     PagesSourceState,
     PublicationOutcome,
@@ -287,6 +289,44 @@ class OrchestrationTests(unittest.TestCase):
 
 
 class AdapterTests(unittest.TestCase):
+    def test_default_content_stager_propagates_configured_sparkle_account(self) -> None:
+        """The production composition must use the configured Keychain account."""
+        from scripts.release.tests.test_staging import config_value
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_value()
+            config["sparkle"]["keychain_account"] = "LinkGate"
+            config_path = root / "publish-config.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            captured: dict[str, str] = {}
+
+            class RecordingSigner:
+                def __init__(self, runner, executable, account="ed25519", private_key_file=None):
+                    captured["signer"] = account
+
+            class RecordingVerifier:
+                def __init__(self, runner, sign_update, openssl, account="ed25519", private_key_file=None):
+                    captured["verifier"] = account
+
+            class Tools:
+                def find(self, name):
+                    return f"/fake/{name}"
+
+            with patch("scripts.release.publish_beta.orchestrator.SignUpdateAdapter", RecordingSigner), \
+                 patch("scripts.release.publish_beta.orchestrator.SparkleSignatureVerifier", RecordingVerifier), \
+                 patch("scripts.release.publish_beta.orchestrator.stage_staged_draft_content", return_value="staged"):
+                result = DefaultContentStager(object(), Tools()).stage(
+                    root,
+                    config_path,
+                    staged(),
+                    PagesSourceState(None, None),
+                )
+
+            self.assertEqual(result, "staged")
+            self.assertEqual(captured, {"signer": "LinkGate", "verifier": "LinkGate"})
+
     def test_pages_push_checks_expected_tip_and_publishes_exact_commit_without_force(self) -> None:
         class Runner:
             def __init__(self) -> None:

@@ -27,6 +27,7 @@ class PublicationConfig:
     release_notes_url_pattern: str
     appcast_url_pattern: str
     sparkle_version: str
+    sparkle_keychain_account: str
     sparkle_public_key: str
     sparkle_archive_name: str
     sparkle_archive_url: str
@@ -126,10 +127,18 @@ def load_config(path: Path) -> PublicationConfig:
 
     sparkle = value["sparkle"]
     verification = value["verification"]
-    if not isinstance(sparkle, dict) or set(sparkle) != {"version", "public_key", "distribution"}:
+    if not isinstance(sparkle, dict) or set(sparkle) != {"version", "keychain_account", "public_key", "distribution"}:
         raise PublicationError(FailureClass.CONFIGURATION, "sparkle config fields do not match schema")
     if sparkle["version"] != "2.9.6":
         raise PublicationError(FailureClass.CONFIGURATION, "Sparkle version must be pinned to 2.9.6")
+    keychain_account = sparkle["keychain_account"]
+    if (
+        not isinstance(keychain_account, str)
+        or not keychain_account.strip()
+        or keychain_account != keychain_account.strip()
+        or keychain_account.startswith("REPLACE_")
+    ):
+        raise PublicationError(FailureClass.CONFIGURATION, "Sparkle Keychain account is unresolved or invalid")
     public_key = sparkle["public_key"]
     if public_key == "REPLACE_AFTER_ONE_TIME_KEY_SETUP":
         raise PublicationError(FailureClass.CONFIGURATION, "Sparkle public key is not configured")
@@ -172,6 +181,7 @@ def load_config(path: Path) -> PublicationConfig:
         release_notes_url_pattern=value["release_notes_url_pattern"],
         appcast_url_pattern=value["appcast_url_pattern"],
         sparkle_version=sparkle["version"],
+        sparkle_keychain_account=keychain_account,
         sparkle_public_key=public_key,
         sparkle_archive_name=distribution["archive_name"],
         sparkle_archive_url=archive_url,

@@ -12,12 +12,15 @@ import XCTest
 // is needed, so an automatic route remains unobtrusive.
 // A4: Lifecycle notifications and incoming URLs never initiate an update check. The only update
 // command is the user-invoked status-menu command.
+// A5: The production AppDelegate invokes pending default-handler restoration at launch through a
+// narrow capability. Restoration is independent of manual update checking and URL delivery.
 // Required natural AppDelegate composition initializer:
 // @MainActor init(
 //     selectionCoordinator: SelectionCoordinator,
 //     incomingURLHandler: IncomingURLHandler,
 //     chooserPanelController: ChooserPanelController,
-//     updateChecking: any UpdateChecking
+//     updateChecking: any UpdateChecking,
+//     handlerPreservationRestoring: (any HandlerPreservationRestoring)?
 // )
 @MainActor
 final class AppDelegateURLDeliveryTests: XCTestCase {
@@ -163,6 +166,20 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         XCTAssertEqual(updateChecker.checkCount, 0)
     }
 
+    func testLaunchRestoresPendingHandlersWithoutInitiatingAnUpdateCheck() {
+        let updateChecker = UpdateCheckRecorder(canCheckForUpdates: true)
+        let handlerRestorer = HandlerPreservationRestoreRecorder()
+        let delegate = makeDelegate(
+            updateChecker: updateChecker,
+            handlerPreservationRestoring: handlerRestorer
+        )
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        XCTAssertEqual(handlerRestorer.restoreCallCount, 1)
+        XCTAssertEqual(updateChecker.checkCount, 0)
+    }
+
     func testURLDeliveryNeverInitiatesAnUpdateCheck() {
         let updateChecker = UpdateCheckRecorder(canCheckForUpdates: true)
         let delegate = makeDelegate(updateChecker: updateChecker)
@@ -253,7 +270,8 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         coordinator: SelectionCoordinator? = nil,
         handler: IncomingURLHandler,
         settingsPresenter: (() -> Void)? = nil,
-        updateChecker: (any UpdateChecking)? = nil
+        updateChecker: (any UpdateChecking)? = nil,
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
     ) -> AppDelegate {
         let coordinator = coordinator ?? SelectionCoordinator(
             discoveryService: EmptyDiscoveryService(),
@@ -269,13 +287,15 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
             incomingURLHandler: handler,
             chooserPanelController: panelController,
             settingsPresenter: settingsPresenter,
-            updateChecking: updateChecking
+            updateChecking: updateChecking,
+            handlerPreservationRestoring: handlerPreservationRestoring
         )
     }
 
     private func makeDelegate(
         settingsPresenter: @escaping () -> Void,
-        updateChecker: (any UpdateChecking)? = nil
+        updateChecker: (any UpdateChecking)? = nil,
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
     ) -> AppDelegate {
         let coordinator = SelectionCoordinator(
             discoveryService: EmptyDiscoveryService(),
@@ -285,12 +305,20 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
             coordinator: coordinator,
             handler: IncomingURLHandler(destination: coordinator),
             settingsPresenter: settingsPresenter,
-            updateChecker: updateChecker
+            updateChecker: updateChecker,
+            handlerPreservationRestoring: handlerPreservationRestoring
         )
     }
 
-    private func makeDelegate(updateChecker: any UpdateChecking) -> AppDelegate {
-        makeDelegate(settingsPresenter: {}, updateChecker: updateChecker)
+    private func makeDelegate(
+        updateChecker: any UpdateChecking,
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
+    ) -> AppDelegate {
+        makeDelegate(
+            settingsPresenter: {},
+            updateChecker: updateChecker,
+            handlerPreservationRestoring: handlerPreservationRestoring
+        )
     }
 
     private func makeDelegate() -> AppDelegate {
@@ -380,6 +408,15 @@ private final class UpdateCheckRecorder: UpdateChecking {
 
     func checkForUpdates() {
         checkCount += 1
+    }
+}
+
+@MainActor
+private final class HandlerPreservationRestoreRecorder: HandlerPreservationRestoring {
+    private(set) var restoreCallCount = 0
+
+    func restorePreservedHandlersIfNeeded() {
+        restoreCallCount += 1
     }
 }
 

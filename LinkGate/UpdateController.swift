@@ -8,12 +8,34 @@ protocol UpdateChecking: AnyObject {
 }
 
 @MainActor
-final class UpdateController: UpdateChecking {
-    private let updater: SPUStandardUpdaterController
+protocol HandlerPreservationRestoring: AnyObject {
+    func restorePreservedHandlersIfNeeded()
+}
 
-    init() {
+@MainActor
+final class UpdateController: NSObject, UpdateChecking, HandlerPreservationRestoring, SPUUpdaterDelegate {
+    private let handlerPreservation: any HandlerPreservationManaging
+    private var updater: SPUStandardUpdaterController!
+
+    override init() {
+        handlerPreservation = HandlerPreservationController()
+        super.init()
         updater = SPUStandardUpdaterController(
-            updaterDelegate: nil,
+            startingUpdater: true,
+            updaterDelegate: self,
+            userDriverDelegate: nil
+        )
+    }
+
+    init(
+        handlerPreservation: any HandlerPreservationManaging,
+        startingUpdater: Bool = true
+    ) {
+        self.handlerPreservation = handlerPreservation
+        super.init()
+        updater = SPUStandardUpdaterController(
+            startingUpdater: startingUpdater,
+            updaterDelegate: self,
             userDriverDelegate: nil
         )
     }
@@ -24,5 +46,16 @@ final class UpdateController: UpdateChecking {
 
     func checkForUpdates() {
         updater.checkForUpdates(nil)
+    }
+
+    func restorePreservedHandlersIfNeeded() {
+        handlerPreservation.restoreIfNeeded { _ in }
+    }
+
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        handlerPreservation.snapshotBeforeInstallation(
+            targetVersion: item.displayVersionString,
+            targetBuild: item.versionString
+        )
     }
 }

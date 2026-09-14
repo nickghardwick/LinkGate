@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsPresenter: () -> Void
     private let updateController: UpdateController?
     private let updateChecking: any UpdateChecking
+    private let handlerPreservationRestoring: (any HandlerPreservationRestoring)?
     private var statusItemController: StatusItemController?
 
     override init() {
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsPresenter = { settingsController.showWindow(nil) }
         self.updateController = updateController
         updateChecking = updateController
+        handlerPreservationRestoring = updateController
         super.init()
     }
 
@@ -58,7 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         routingRuleStore: RoutingRuleStore? = nil,
         browserDiscoveryService: BrowserDiscoveryService? = nil,
         settingsPresenter: (() -> Void)? = nil,
-        updateChecking: any UpdateChecking
+        updateChecking: any UpdateChecking,
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
     ) {
         self.routingRuleStore = routingRuleStore ?? UserDefaultsRoutingRuleStore()
         self.browserDiscoveryService = browserDiscoveryService ?? NSWorkspaceBrowserDiscoveryService(
@@ -73,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settingsPresenter = settingsPresenter ?? {}
         self.updateController = nil
         self.updateChecking = updateChecking
+        self.handlerPreservationRestoring = handlerPreservationRestoring
         super.init()
     }
 
@@ -80,6 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard statusItemController == nil else {
             return
         }
+
+        handlerPreservationRestoring?.restorePreservedHandlersIfNeeded()
 
         statusItemController = StatusItemController(
             settingsPresenter: { [weak self] in self?.showSettings() },

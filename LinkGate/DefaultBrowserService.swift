@@ -7,6 +7,19 @@ struct DefaultBrowserStatus: Equatable {
     var isDefault: Bool { httpIsDefault && httpsIsDefault }
 }
 
+enum ApplicationBundleIdentity {
+    static func refersToSameApplication(_ lhs: URL, _ rhs: URL) -> Bool {
+        normalizedApplicationPath(lhs) == normalizedApplicationPath(rhs)
+    }
+
+    private static func normalizedApplicationPath(_ url: URL) -> String {
+        url.standardizedFileURL
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
+    }
+}
+
 @MainActor
 protocol DefaultBrowserService {
     func status() -> DefaultBrowserStatus
@@ -73,25 +86,14 @@ final class NSWorkspaceDefaultBrowserService: DefaultBrowserService {
         guard let expectedBundleIdentifier = bundleIdentifier,
               let schemeURL = URL(string: "\(scheme)://example.com"),
               let resolvedURL = workspace.applicationURL(toOpen: schemeURL),
-              refersToSameApplication(resolvedURL, applicationURL)
+              ApplicationBundleIdentity.refersToSameApplication(resolvedURL, applicationURL)
         else { return false }
         return workspace.bundleIdentifier(at: resolvedURL) == expectedBundleIdentifier
-    }
-
-    private func refersToSameApplication(_ lhs: URL, _ rhs: URL) -> Bool {
-        normalizedApplicationPath(lhs) == normalizedApplicationPath(rhs)
-    }
-
-    private func normalizedApplicationPath(_ url: URL) -> String {
-        url.standardizedFileURL
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-            .path
     }
 }
 
 @MainActor
-private final class NSWorkspaceDefaultBrowserWorkspace: DefaultBrowserWorkspace {
+final class NSWorkspaceDefaultBrowserWorkspace: DefaultBrowserWorkspace {
     func applicationURL(toOpen url: URL) -> URL? {
         NSWorkspace.shared.urlForApplication(toOpen: url)
     }

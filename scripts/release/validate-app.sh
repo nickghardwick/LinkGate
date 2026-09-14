@@ -193,12 +193,31 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+assert_production_signature() {
+    local signed_object=$1
+    local description=$2
+    local expected_identity
+
+    codesign --verify --strict --verbose=2 "$signed_object" >/dev/null 2>&1 || fail "$description code signature verification failed"
+    codesign --display --verbose=4 "$signed_object" >"$signature_output" 2>&1 || fail "could not inspect $description code signature"
+    expected_identity=$(metadata_value signing_identity)
+    grep -F "Authority=$expected_identity" "$signature_output" >/dev/null || fail "$description is not signed with the configured Developer ID identity"
+    grep -F "TeamIdentifier=$TEAM_ID" "$signature_output" >/dev/null || fail "$description signing team does not match release policy"
+    grep -F 'flags=0x10000(runtime)' "$signature_output" >/dev/null || fail "$description is missing the hardened runtime"
+    grep -F 'Timestamp=' "$signature_output" >/dev/null || fail "$description is missing a secure timestamp"
+}
+
+for sparkle_signed_object in \
+    "$sparkle_runtime/XPCServices/Installer.xpc" \
+    "$sparkle_runtime/XPCServices/Downloader.xpc" \
+    "$sparkle_runtime/Autoupdate" \
+    "$sparkle_runtime/Updater.app" \
+    "$sparkle_framework"; do
+    assert_production_signature "$sparkle_signed_object" 'Sparkle runtime object'
+done
+
 codesign --verify --deep --strict --verbose=2 "$app" >/dev/null 2>&1 || fail 'application code signature verification failed'
-codesign --display --verbose=4 "$app" >"$signature_output" 2>&1 || fail 'could not inspect application code signature'
-grep -F "Authority=$SIGNING_IDENTITY_PREFIX:" "$signature_output" | grep -F "($TEAM_ID)" >/dev/null || fail 'application is not signed with the configured Developer ID identity'
-grep -F "TeamIdentifier=$TEAM_ID" "$signature_output" >/dev/null || fail 'application signing team does not match release policy'
-grep -F 'flags=0x10000(runtime)' "$signature_output" >/dev/null || fail 'application is missing the hardened runtime'
-grep -F 'Timestamp=' "$signature_output" >/dev/null || fail 'application is missing a secure timestamp'
+assert_production_signature "$app" 'application'
 if [ "$require_stapled_ticket" = true ]; then
     xcrun stapler validate "$app" >/dev/null 2>&1 || fail 'application does not have a valid stapled notarization ticket'
     spctl --assess --type execute --verbose=4 "$app" >/dev/null 2>&1 || fail 'Gatekeeper rejected the application'

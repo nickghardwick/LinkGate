@@ -125,6 +125,67 @@ assert_log_contains() {
     grep -F -x -- "$expected" "$log" >/dev/null || fail "expected log entry: $expected"
 }
 
+sparkle_signing_line() {
+    local target=$1
+
+    awk -v target="$target" '
+        substr($0, length($0) - length(target) + 1) == target {
+            print NR
+            exit
+        }
+    ' "$codesign_commands_log"
+}
+
+assert_sparkle_signing_invocation() {
+    local target=$1
+    local expected_preserved_metadata=${2:-false}
+    local invocation
+
+    invocation=$(awk -v target="$target" '
+        substr($0, length($0) - length(target) + 1) == target {
+            print
+            exit
+        }
+    ' "$codesign_commands_log")
+    [ -n "$invocation" ] || fail "expected a codesign invocation for $target"
+    for required_flag in \
+        '--force' \
+        '--options runtime' \
+        '--timestamp' \
+        '--sign Developer ID Application: Nicholas Hardwick (Z8A8ZWCZ45)'; do
+        case "$invocation" in
+            *"$required_flag"*) ;;
+            *) fail "expected $required_flag for $target: $invocation" ;;
+        esac
+    done
+    case "$invocation" in
+        *'--deep'*) fail "Sparkle runtime signing must not use --deep: $invocation" ;;
+    esac
+    if [ "$expected_preserved_metadata" = true ]; then
+        case "$invocation" in
+            *'--preserve-metadata=entitlements'*) ;;
+            *) fail "expected Downloader entitlement preservation: $invocation" ;;
+        esac
+    else
+        case "$invocation" in
+            *'--preserve-metadata=entitlements'*) fail "unexpected entitlement preservation on $target: $invocation" ;;
+        esac
+    fi
+}
+
+assert_sparkle_signing_sequence() {
+    local previous=0
+    local target
+    local line
+
+    for target in "$@"; do
+        line=$(sparkle_signing_line "$target")
+        [ -n "$line" ] || fail "expected a codesign invocation for $target"
+        [ "$line" -gt "$previous" ] || fail "expected Sparkle runtime signing to be inside-out at $target"
+        previous=$line
+    done
+}
+
 write_dmg_validation_stubs() {
     local bin=$1
     local app_fixture=$2
@@ -479,6 +540,12 @@ app="$derived_data/Build/Products/Release/LinkGate.app"
 mkdir -p "$app/Contents/MacOS"
 : >"$app/Contents/MacOS/LinkGate"
 chmod +x "$app/Contents/MacOS/LinkGate"
+sparkle_runtime="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
+mkdir -p "$sparkle_runtime/XPCServices/Installer.xpc" \
+    "$sparkle_runtime/XPCServices/Downloader.xpc" \
+    "$sparkle_runtime/Updater.app"
+: >"$sparkle_runtime/Autoupdate"
+chmod +x "$sparkle_runtime/Autoupdate"
 printf '%s\n' "$app" >"$BUILT_APP_LOG"
 STUB
 
@@ -487,8 +554,10 @@ STUB
 set -euo pipefail
 printf 'sign\n' >>"$STAGE_LOG"
 [ "${FAIL_STAGE:-}" != sign ] || exit 74
+invocation="$*"
 while [ "$#" -gt 0 ]; do
     if [ "$1" = --sign ]; then
+        printf '%s\n' "$invocation" >>"$CODESIGN_COMMAND_LOG"
         printf '%s\n' "$2" >"$CODESIGN_IDENTITY_LOG"
         break
     fi
@@ -721,6 +790,7 @@ new_release_case() {
     git_worktree_diff_log="$case_root/git-worktree-diff.log"
     git_untracked_log="$case_root/git-untracked.log"
     codesign_identity_log="$case_root/codesign-identity.log"
+    codesign_commands_log="$case_root/codesign-commands.log"
     archive_source="$case_root/archive-source"
 
     mkdir -p "$release_dir" "$fixture_repo/LinkGate.xcodeproj" "$fixture_repo/dist" "$archive_source/LinkGate.xcodeproj"
@@ -746,6 +816,7 @@ new_release_case() {
     : >"$git_index_tree_log"
     : >"$git_worktree_diff_log"
     : >"$git_untracked_log"
+    : >"$codesign_commands_log"
     chmod +x "$release_dir/release.sh"
     write_release_stubs "$stub_bin" "$release_dir"
 }
@@ -797,6 +868,7 @@ run_release() {
             GIT_UNTRACKED_AFTER="${GIT_UNTRACKED_AFTER:-}" \
             GIT_ARCHIVE_SOURCE="$archive_source" \
             CODESIGN_IDENTITY_LOG="$codesign_identity_log" \
+            CODESIGN_COMMAND_LOG="$codesign_commands_log" \
             CONFIG_SOURCED_MARKER="$config_sourced_marker" \
             RELEASE_DIST="$fixture_repo/dist" \
             RELEASE_FINAL="$(dirname "$fixture_repo/dist")/.linkgate-release-final" \
@@ -896,8 +968,24 @@ assert_no_stage "$stage_log" publish
 assert_no_stage "$stage_log" rmdir
 assert_empty_file "$publication_command_log"
 [ "$(cat "$codesign_identity_log")" = 'Developer ID Application: Nicholas Hardwick (Z8A8ZWCZ45)' ] || fail 'expected codesign to receive the Keychain-selected Developer ID authority'
+[ "$(wc -l <"$codesign_commands_log" | tr -d ' ')" = 6 ] || fail 'expected exactly the approved Sparkle runtime and outer app signing invocations'
 [ "$(wc -l <"$validate_app_log" | tr -d ' ')" = 2 ] || fail 'expected built and stapled app validation exactly once each'
 built_app="$(cat "$built_app_log")"
+sparkle_runtime="$built_app/Contents/Frameworks/Sparkle.framework/Versions/B"
+sparkle_framework="$built_app/Contents/Frameworks/Sparkle.framework"
+assert_sparkle_signing_invocation "$sparkle_runtime/XPCServices/Installer.xpc"
+assert_sparkle_signing_invocation "$sparkle_runtime/XPCServices/Downloader.xpc" true
+assert_sparkle_signing_invocation "$sparkle_runtime/Autoupdate"
+assert_sparkle_signing_invocation "$sparkle_runtime/Updater.app"
+assert_sparkle_signing_invocation "$sparkle_framework"
+assert_sparkle_signing_invocation "$built_app"
+assert_sparkle_signing_sequence \
+    "$sparkle_runtime/XPCServices/Installer.xpc" \
+    "$sparkle_runtime/XPCServices/Downloader.xpc" \
+    "$sparkle_runtime/Autoupdate" \
+    "$sparkle_runtime/Updater.app" \
+    "$sparkle_framework" \
+    "$built_app"
 first_validated_app=$(sed -n '1s/|.*//p' "$validate_app_log")
 second_validated_app=$(sed -n '2s/|.*//p' "$validate_app_log")
 [ "$first_validated_app" = "$built_app" ] || fail 'expected built app validation to target the release build product'

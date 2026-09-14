@@ -130,7 +130,41 @@ xcodebuild \
 assert_source_snapshot
 
 [ -d "$app" ] || fail "release build did not produce $PRODUCT_NAME.app"
-codesign --force --options runtime --timestamp --sign "$signing_identity" "$app"
+sign_sparkle_runtime() {
+    local sparkle_framework=$app/Contents/Frameworks/Sparkle.framework
+    local sparkle_runtime=$sparkle_framework/Versions/B
+    local installer=$sparkle_runtime/XPCServices/Installer.xpc
+    local downloader=$sparkle_runtime/XPCServices/Downloader.xpc
+    local autoupdate=$sparkle_runtime/Autoupdate
+    local updater=$sparkle_runtime/Updater.app
+
+    [ -d "$sparkle_framework" ] || fail 'release build is missing Sparkle.framework'
+    [ -d "$installer" ] || fail 'release build is missing the Sparkle Installer XPC service'
+    [ -d "$downloader" ] || fail 'release build is missing the Sparkle Downloader XPC service'
+    [ -f "$autoupdate" ] && [ -x "$autoupdate" ] || fail 'release build is missing the Sparkle Autoupdate helper'
+    [ -d "$updater" ] || fail 'release build is missing the Sparkle Updater application'
+
+    # Sparkle 2.9.6 requires explicitly signing its approved runtime
+    # inside-out for non-Archive distribution workflows. Do not use --deep:
+    # Downloader may carry service-specific entitlements.
+    codesign --force --sign "$signing_identity" --options runtime --timestamp "$installer"
+    codesign --verify --strict --verbose=2 "$installer"
+
+    codesign --force --sign "$signing_identity" --options runtime --timestamp --preserve-metadata=entitlements "$downloader"
+    codesign --verify --strict --verbose=2 "$downloader"
+
+    codesign --force --sign "$signing_identity" --options runtime --timestamp "$autoupdate"
+    codesign --verify --strict --verbose=2 "$autoupdate"
+
+    codesign --force --sign "$signing_identity" --options runtime --timestamp "$updater"
+    codesign --verify --strict --verbose=2 "$updater"
+
+    codesign --force --sign "$signing_identity" --options runtime --timestamp "$sparkle_framework"
+    codesign --verify --strict --verbose=2 "$sparkle_framework"
+}
+
+sign_sparkle_runtime
+codesign --force --sign "$signing_identity" --options runtime --timestamp "$app"
 "$script_dir/validate-app.sh" --app "$app" --metadata "$metadata" --observed-out "$built_observed"
 
 ditto -c -k --keepParent "$app" "$notary_zip"

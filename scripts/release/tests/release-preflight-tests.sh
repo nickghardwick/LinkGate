@@ -180,15 +180,32 @@ set -euo pipefail
 
 printf 'codesign %s\n' "$*" >>"$STUB_LOG"
 if [ "$1" = "--verify" ]; then
+    target=${!#}
+    if [ -n "${NESTED_CODESIGN_VERIFY_TARGET:-}" ] && [[ "$target" == *"$NESTED_CODESIGN_VERIFY_TARGET" ]]; then
+        [ "${NESTED_CODESIGN_VERIFY_OK:-1}" = 1 ] || exit 1
+    fi
     [ "${CODESIGN_VERIFY_OK:-1}" = 1 ] || exit 1
     exit 0
 fi
 
 if [ "$1" = "--display" ]; then
-    printf 'Authority=%s: %s (%s)\n' "${SIGNING_PREFIX:-Developer ID Application}" "${SIGNING_NAME:-LinkGate}" "${SIGNING_TEAM_ID:-Z8A8ZWCZ45}" >&2
-    printf 'TeamIdentifier=%s\n' "${SIGNING_TEAM_ID:-Z8A8ZWCZ45}" >&2
-    [ "${HARDENED_RUNTIME:-1}" = 1 ] && printf 'flags=0x10000(runtime)\n' >&2
-    [ "${SECURE_TIMESTAMP:-1}" = 1 ] && printf 'Timestamp=2026-09-11 00:00:00 +0000\n' >&2
+    target=${!#}
+    signing_prefix=${SIGNING_PREFIX:-Developer ID Application}
+    signing_name=${SIGNING_NAME:-LinkGate}
+    signing_team_id=${SIGNING_TEAM_ID:-Z8A8ZWCZ45}
+    hardened_runtime=${HARDENED_RUNTIME:-1}
+    secure_timestamp=${SECURE_TIMESTAMP:-1}
+    if [ -n "${NESTED_SIGNING_TARGET:-}" ] && [[ "$target" == *"$NESTED_SIGNING_TARGET" ]]; then
+        signing_prefix=${NESTED_SIGNING_PREFIX:-$signing_prefix}
+        signing_name=${NESTED_SIGNING_NAME:-$signing_name}
+        signing_team_id=${NESTED_SIGNING_TEAM_ID:-$signing_team_id}
+        hardened_runtime=${NESTED_HARDENED_RUNTIME:-$hardened_runtime}
+        secure_timestamp=${NESTED_SECURE_TIMESTAMP:-$secure_timestamp}
+    fi
+    printf 'Authority=%s: %s (%s)\n' "$signing_prefix" "$signing_name" "$signing_team_id" >&2
+    printf 'TeamIdentifier=%s\n' "$signing_team_id" >&2
+    [ "$hardened_runtime" = 1 ] && printf 'flags=0x10000(runtime)\n' >&2
+    [ "$secure_timestamp" = 1 ] && printf 'Timestamp=2026-09-11 00:00:00 +0000\n' >&2
     exit 0
 fi
 
@@ -700,6 +717,24 @@ assert_validation_failure missing-hardened-runtime "$app" "$valid_metadata" "$ob
 
 new_app_case missing-secure-timestamp
 assert_validation_failure missing-secure-timestamp "$app" "$valid_metadata" "$observed" SECURE_TIMESTAMP=0
+
+new_app_case nested-sparkle-identity-mismatch
+assert_validation_failure nested-sparkle-identity-mismatch "$app" "$valid_metadata" "$observed" NESTED_SIGNING_TARGET=Downloader.xpc NESTED_SIGNING_PREFIX='Apple Development'
+
+new_app_case nested-sparkle-team-mismatch
+assert_validation_failure nested-sparkle-team-mismatch "$app" "$valid_metadata" "$observed" NESTED_SIGNING_TARGET=Updater.app NESTED_SIGNING_TEAM_ID=OTHERTEAM123
+
+new_app_case nested-sparkle-framework-identity-mismatch
+assert_validation_failure nested-sparkle-framework-identity-mismatch "$app" "$valid_metadata" "$observed" NESTED_SIGNING_TARGET=/Sparkle.framework NESTED_SIGNING_PREFIX='Apple Development'
+
+new_app_case nested-sparkle-missing-hardened-runtime
+assert_validation_failure nested-sparkle-missing-hardened-runtime "$app" "$valid_metadata" "$observed" NESTED_SIGNING_TARGET=Autoupdate NESTED_HARDENED_RUNTIME=0
+
+new_app_case nested-sparkle-missing-secure-timestamp
+assert_validation_failure nested-sparkle-missing-secure-timestamp "$app" "$valid_metadata" "$observed" NESTED_SIGNING_TARGET=Installer.xpc NESTED_SECURE_TIMESTAMP=0
+
+new_app_case nested-sparkle-invalid-signature
+assert_validation_failure nested-sparkle-invalid-signature "$app" "$valid_metadata" "$observed" NESTED_CODESIGN_VERIFY_TARGET=Installer.xpc NESTED_CODESIGN_VERIFY_OK=0
 
 new_app_case gatekeeper-rejection
 assert_fails gatekeeper-rejection run_validate_app_require_stapled_ticket "$app" "$valid_metadata" "$observed" SPCTL_OK=0

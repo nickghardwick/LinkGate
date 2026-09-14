@@ -383,6 +383,86 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         XCTAssertTrue(gated.contains("- HTTPS: not attempted"))
     }
 
+    // Task 4 acceptance 3 and 4: the native pasteboard command must replace stale contents with
+    // a snapshot assembled when the command is invoked, rather than reusing state from controller
+    // construction. A regression that caches the snapshot, appends to existing pasteboard content,
+    // or fails to write plain text will fail this test.
+    func testCopyDiagnosticsReplacesStalePasteboardWithFreshCurrentSnapshot() throws {
+        let store = makeStore()
+        var defaultBrowserStatus = DefaultBrowserDiagnosticStatus(http: .unresolved, https: .unresolved)
+        var updateState = UpdateDiagnosticState(
+            automaticallyChecksForUpdates: true,
+            automaticallyDownloadsUpdates: false,
+            canCheckForUpdates: true,
+            sessionInProgress: false,
+            latestHandlerPreservationResult: nil
+        )
+        let controller = DiagnosticsController(
+            ruleStore: store,
+            browserDiscovery: FixedBrowserDiscovery(candidates: []),
+            defaultBrowserStatus: { defaultBrowserStatus },
+            updateDiagnosticState: { updateState },
+            applicationVersion: "0.1.8",
+            applicationBuild: "108",
+            macOSVersion: "15.0",
+            applicationURL: URL(fileURLWithPath: "/Applications/LinkGate.app")
+        )
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("stale private diagnostic", forType: .string))
+
+        _ = try store.create(
+            matchType: .urlPrefix,
+            pattern: "https://private.example/document/INV-483?token=rule-secret",
+            browserBundleIdentifier: "org.example.rule-target"
+        )
+        defaultBrowserStatus = .init(
+            http: .exactCurrentApplication,
+            https: .otherApplication(bundleIdentifier: "org.example.browser")
+        )
+        updateState = .init(
+            automaticallyChecksForUpdates: false,
+            automaticallyDownloadsUpdates: true,
+            canCheckForUpdates: false,
+            sessionInProgress: true,
+            latestHandlerPreservationResult: .init(
+                disposition: .restored,
+                http: .restored,
+                https: .alreadyOwnedByCurrentApplication
+            )
+        )
+
+        controller.copyDiagnostics(to: pasteboard)
+
+        XCTAssertEqual(
+            pasteboard.string(forType: .string),
+            """
+            LinkGate diagnostics
+            App
+            - Version: 0.1.8 (108)
+            - macOS: 15.0
+            - Location: Applications
+            Default handlers
+            - HTTP: current LinkGate bundle
+            - HTTPS: other application (org.example.browser)
+            Browsers
+            - Enabled: none
+            - Disabled detected: 0
+            Routing
+            - Rules: 1
+            Updates
+            - Automatic checks: disabled
+            - Automatic downloads: enabled
+            - Can check now: no
+            - Update session in progress: yes
+            Handler preservation
+            - Result: restored
+            - HTTP: restored
+            - HTTPS: already owned by current application
+            """
+        )
+    }
+
     private func makeController(
         store: UserDefaultsRoutingRuleStore? = nil,
         candidates: [ApplicationCandidate] = [],

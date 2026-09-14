@@ -7,15 +7,18 @@ final class StatusItemController: NSObject, NSMenuItemValidation {
     let statusItem: NSStatusItem
     private let settingsPresenter: () -> Void
     private let updateChecking: any UpdateChecking
+    private let copyDiagnostics: () -> Void
     private let applicationTerminator: () -> Void
 
     init(
         settingsPresenter: @escaping () -> Void,
         updateChecking: any UpdateChecking,
+        copyDiagnostics: @escaping () -> Void,
         applicationTerminator: @escaping () -> Void
     ) {
         self.settingsPresenter = settingsPresenter
         self.updateChecking = updateChecking
+        self.copyDiagnostics = copyDiagnostics
         self.applicationTerminator = applicationTerminator
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         menu = NSMenu()
@@ -41,6 +44,13 @@ final class StatusItemController: NSObject, NSMenuItemValidation {
         )
         updateItem.isEnabled = updateChecking.canCheckForUpdates
         menu.addItem(updateItem)
+        menu.addItem(
+            NSMenuItem(
+                title: "Copy Diagnostics",
+                action: #selector(copyDiagnosticsToPasteboard),
+                keyEquivalent: ""
+            )
+        )
         menu.addItem(.separator())
         menu.addItem(
             NSMenuItem(
@@ -64,6 +74,10 @@ final class StatusItemController: NSObject, NSMenuItemValidation {
             return
         }
         updateChecking.checkForUpdates()
+    }
+
+    @objc private func copyDiagnosticsToPasteboard() {
+        copyDiagnostics()
     }
 
     @objc private func quit() {

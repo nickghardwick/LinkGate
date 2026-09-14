@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 @MainActor
 final class DiagnosticsController {
@@ -61,6 +61,11 @@ final class DiagnosticsController {
             ruleCount: ruleStore.rules.count,
             updateState: updateDiagnosticState()
         )
+    }
+
+    func copyDiagnostics(to pasteboard: NSPasteboard = .general) {
+        pasteboard.clearContents()
+        pasteboard.setString(snapshot().renderedText, forType: .string)
     }
 
     private func diagnosticBrowsers(

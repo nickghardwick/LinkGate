@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updateController: UpdateController?
     private let updateChecking: any UpdateChecking
     private let handlerPreservationRestoring: (any HandlerPreservationRestoring)?
+    private let diagnosticsController: DiagnosticsController?
     private var statusItemController: StatusItemController?
 
     override init() {
@@ -51,6 +52,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.updateController = updateController
         updateChecking = updateController
         handlerPreservationRestoring = updateController
+        let operatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+        diagnosticsController = DiagnosticsController(
+            ruleStore: routingRuleStore,
+            browserDiscovery: discoveryService,
+            defaultBrowserStatus: { defaultBrowserService.diagnosticStatus() },
+            updateDiagnosticState: { updateController.diagnosticState },
+            applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            applicationBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+            macOSVersion: "\(operatingSystemVersion.majorVersion).\(operatingSystemVersion.minorVersion).\(operatingSystemVersion.patchVersion)",
+            applicationURL: Bundle.main.bundleURL
+        )
         super.init()
     }
 
@@ -78,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.updateController = nil
         self.updateChecking = updateChecking
         self.handlerPreservationRestoring = handlerPreservationRestoring
+        diagnosticsController = nil
         super.init()
     }
 
@@ -96,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = StatusItemController(
             settingsPresenter: { [weak self] in self?.showSettings() },
             updateChecking: updateChecking,
+            copyDiagnostics: { [weak self] in self?.diagnosticsController?.copyDiagnostics() },
             applicationTerminator: { NSApp.terminate(nil) }
         )
     }

@@ -8,6 +8,18 @@ struct DefaultBrowserStatus: Equatable {
     var isDefault: Bool { httpIsDefault && httpsIsDefault }
 }
 
+struct DefaultBrowserDiagnosticStatus: Equatable {
+    enum HandlerIdentity: Equatable {
+        case exactCurrentApplication
+        case sameBundleIdentifierAtDifferentLocation(DiagnosticLocation.Classification)
+        case otherApplication(bundleIdentifier: String)
+        case unresolved
+    }
+
+    let http: HandlerIdentity
+    let https: HandlerIdentity
+}
+
 enum ApplicationBundleIdentity {
     static func refersToSameApplication(_ lhs: URL, _ rhs: URL) -> Bool {
         normalizedApplicationPath(lhs) == normalizedApplicationPath(rhs)
@@ -59,8 +71,15 @@ final class NSWorkspaceDefaultBrowserService: DefaultBrowserService {
 
     func status() -> DefaultBrowserStatus {
         DefaultBrowserStatus(
-            httpIsDefault: ownership(forScheme: "http") == .exact,
-            httpsIsDefault: ownership(forScheme: "https") == .exact
+            httpIsDefault: diagnosticIdentity(forScheme: "http") == .exactCurrentApplication,
+            httpsIsDefault: diagnosticIdentity(forScheme: "https") == .exactCurrentApplication
+        )
+    }
+
+    func diagnosticStatus() -> DefaultBrowserDiagnosticStatus {
+        DefaultBrowserDiagnosticStatus(
+            http: diagnosticIdentity(forScheme: "http"),
+            https: diagnosticIdentity(forScheme: "https")
         )
     }
 
@@ -100,24 +119,46 @@ final class NSWorkspaceDefaultBrowserService: DefaultBrowserService {
     }
 
     private func ownership(forScheme scheme: String) -> Ownership {
+        switch diagnosticIdentity(forScheme: scheme) {
+        case .exactCurrentApplication:
+            .exact
+        case .sameBundleIdentifierAtDifferentLocation:
+            .wrongCopy
+        case .otherApplication:
+            .otherApplication
+        case .unresolved:
+            .unresolved
+        }
+    }
+
+    private func diagnosticIdentity(forScheme scheme: String) -> DefaultBrowserDiagnosticStatus.HandlerIdentity {
         guard let expectedBundleIdentifier = bundleIdentifier,
               let schemeURL = URL(string: "\(scheme)://example.com"),
-              let resolvedURL = workspace.applicationURL(toOpen: schemeURL)
+              let resolvedURL = workspace.applicationURL(toOpen: schemeURL),
+              let resolvedBundleIdentifier = workspace.bundleIdentifier(at: resolvedURL)
         else {
             logOwnership(.unresolved, forScheme: scheme)
             return .unresolved
         }
 
-        let ownership: Ownership
         if ApplicationBundleIdentity.refersToSameApplication(resolvedURL, applicationURL) {
-            ownership = workspace.bundleIdentifier(at: resolvedURL) == expectedBundleIdentifier ? .exact : .otherApplication
-        } else if workspace.bundleIdentifier(at: resolvedURL) == expectedBundleIdentifier {
-            ownership = .wrongCopy
-        } else {
-            ownership = .otherApplication
+            if resolvedBundleIdentifier == expectedBundleIdentifier {
+                logOwnership(.exact, forScheme: scheme)
+                return .exactCurrentApplication
+            }
+            logOwnership(.otherApplication, forScheme: scheme)
+            return .otherApplication(bundleIdentifier: resolvedBundleIdentifier)
         }
-        logOwnership(ownership, forScheme: scheme)
-        return ownership
+
+        if resolvedBundleIdentifier == expectedBundleIdentifier {
+            logOwnership(.wrongCopy, forScheme: scheme)
+            return .sameBundleIdentifierAtDifferentLocation(
+                DiagnosticLocation.classification(for: resolvedURL)
+            )
+        }
+
+        logOwnership(.otherApplication, forScheme: scheme)
+        return .otherApplication(bundleIdentifier: resolvedBundleIdentifier)
     }
 
     private func logOwnership(_ ownership: Ownership, forScheme scheme: String) {

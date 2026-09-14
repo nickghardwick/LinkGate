@@ -13,6 +13,14 @@ protocol HandlerPreservationRestoring: AnyObject {
     func restorePreservedHandlersIfNeeded()
 }
 
+struct UpdateDiagnosticState: Equatable {
+    let automaticallyChecksForUpdates: Bool
+    let automaticallyDownloadsUpdates: Bool
+    let canCheckForUpdates: Bool
+    let sessionInProgress: Bool
+    let latestHandlerPreservationResult: HandlerPreservationRestorationSummary?
+}
+
 @MainActor
 final class UpdateController: NSObject, UpdateChecking, HandlerPreservationRestoring, SPUUpdaterDelegate {
     private let handlerPreservation: any HandlerPreservationManaging
@@ -44,6 +52,16 @@ final class UpdateController: NSObject, UpdateChecking, HandlerPreservationResto
 
     var canCheckForUpdates: Bool {
         updater.updater.canCheckForUpdates
+    }
+
+    var diagnosticState: UpdateDiagnosticState {
+        UpdateDiagnosticState(
+            automaticallyChecksForUpdates: updater.updater.automaticallyChecksForUpdates,
+            automaticallyDownloadsUpdates: updater.updater.automaticallyDownloadsUpdates,
+            canCheckForUpdates: updater.updater.canCheckForUpdates,
+            sessionInProgress: updater.updater.sessionInProgress,
+            latestHandlerPreservationResult: latestHandlerPreservationResult
+        )
     }
 
     func checkForUpdates() {

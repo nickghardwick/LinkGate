@@ -2,8 +2,8 @@
 
 `make release` is the existing Step 6 workflow. It creates the signed,
 notarized, stapled DMG, checksum, and provenance manifest in the ignored
-`dist/` directory. The current `0.1.3 (5)` output is validation evidence only;
-it is not a publishable Step 7 release.
+`dist/` directory. The artifact is publishable only when its source is committed
+with matching versioned release notes and passes publication preflight.
 
 ## Publication foundation setup
 
@@ -55,10 +55,8 @@ blocking categories and reasons. The check does not create refs or releases,
 write Pages, sign archives, install dependencies, rebuild the app, or modify
 `dist/`.
 
-The current `0.1.3 (5)` artifact also remains validation evidence only because
-its source commit has no committed versioned release notes. A future publishable
-release must use a fresh Step 6 artifact from the source commit containing its
-matching release notes.
+A publishable release must use a fresh Step 6 artifact from the source commit
+containing its matching versioned release notes.
 
 The staging core used by later pipeline composition consumes a successful
 preflight, creates one unsigned annotated version tag, pushes that tag

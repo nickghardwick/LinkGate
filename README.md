@@ -47,8 +47,8 @@ Run `make publish-beta-tests` to exercise the offline publication suite.
 See [`RELEASING.md`](RELEASING.md) for the public release-tooling setup and
 publication sequence. `make publish-beta-check` is the read-only readiness
 check, while `make publish-beta` is the explicit public publication command.
-The current `0.1.3 (5)` release remains validation evidence only; publication
-also requires resolved infrastructure and a fresh publishable Step 6 release.
+Public beta releases use committed versioned notes and the existing signed,
+notarized release and publication workflow.
 
 Build output is written to `build/DerivedData/`. It is generated locally and
 is excluded from version control.

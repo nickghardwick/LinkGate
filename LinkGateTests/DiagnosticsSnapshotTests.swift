@@ -11,6 +11,8 @@ import XCTest
 // 5: updater output is limited to the four stable Sparkle values and accurately labels downloads.
 // 6: handler-preservation output is the in-memory summary, with no-pending represented as none this launch.
 // 7: output is deterministic plain text and rejects application paths, persisted identity keys, rules, URLs, and names.
+// V1-A Task 7: diagnostics render only the four safe Launch-at-Login domain states;
+// they never disclose setup persistence, user/path data, or raw operating-system errors.
 @MainActor
 final class DiagnosticsSnapshotTests: XCTestCase {
     private var suiteName: String!
@@ -51,6 +53,8 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             - Version: 0.1.8 (108)
             - macOS: 15.0
             - Location: Development copy
+            Launch
+            - At login: unavailable
             Default handlers
             - HTTP: current LinkGate bundle
             - HTTPS: other application (org.example.other-browser)
@@ -92,6 +96,43 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             "alice",
             "LinkGate-secret",
             "/Users/alice",
+        ])
+    }
+
+    func testSnapshotRendersEverySafeLaunchAtLoginState() {
+        let expectedLines: [(LaunchAtLoginStatus, String)] = [
+            (.enabled, "- At login: enabled"),
+            (.disabled, "- At login: disabled"),
+            (.requiresApproval, "- At login: requires approval"),
+            (.unavailable, "- At login: unavailable"),
+        ]
+
+        for (status, expectedLine) in expectedLines {
+            let text = makeController(launchAtLoginStatus: status).snapshot().renderedText
+
+            XCTAssertEqual(
+                section(in: text, heading: "Launch", endingBefore: "Default handlers"),
+                ["Launch", expectedLine]
+            )
+        }
+    }
+
+    func testLaunchAtLoginDiagnosticsExcludeSetupMarkerAndSensitiveOperationalDetails() {
+        let privateApplicationURL = URL(fileURLWithPath: "/Users/alice/Library/Developer/LinkGate-private/LinkGate.app")
+        let text = makeController(
+            applicationURL: privateApplicationURL,
+            launchAtLoginStatus: .requiresApproval
+        ).snapshot().renderedText
+
+        XCTAssertTrue(text.contains("- At login: requires approval"))
+        assertDoesNotContain(text, anyOf: [
+            "setupCompletedVersion",
+            "LinkGate.setupCompletedVersion",
+            "onboarding",
+            "alice",
+            privateApplicationURL.path,
+            "/Users/",
+            "localizedDescription",
         ])
     }
 
@@ -447,6 +488,8 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             - Version: 0.1.8 (108)
             - macOS: 15.0
             - Location: Applications
+            Launch
+            - At login: unavailable
             Default handlers
             - HTTP: current LinkGate bundle
             - HTTPS: other application (org.example.browser)
@@ -474,6 +517,7 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         browserDiscovery: FixedBrowserDiscovery? = nil,
         applicationURL: URL = URL(fileURLWithPath: "/Applications/LinkGate.app"),
         defaultBrowserStatus: DefaultBrowserDiagnosticStatus = .init(http: .unresolved, https: .unresolved),
+        launchAtLoginStatus: LaunchAtLoginStatus = .unavailable,
         updateState: UpdateDiagnosticState = .init(
             automaticallyChecksForUpdates: true,
             automaticallyDownloadsUpdates: false,
@@ -486,6 +530,7 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             ruleStore: store ?? makeStore(),
             browserDiscovery: browserDiscovery ?? FixedBrowserDiscovery(candidates: candidates),
             defaultBrowserStatus: { defaultBrowserStatus },
+            launchAtLoginStatus: { launchAtLoginStatus },
             updateDiagnosticState: { updateState },
             applicationVersion: "0.1.8",
             applicationBuild: "108",

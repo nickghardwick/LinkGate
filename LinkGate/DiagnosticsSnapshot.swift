@@ -12,6 +12,7 @@ struct DiagnosticsSnapshot: Equatable {
     let macOSVersion: String
     let applicationLocation: DiagnosticLocation.Classification
     let defaultBrowserStatus: DefaultBrowserDiagnosticStatus
+    let launchAtLoginStatus: LaunchAtLoginStatus
     let enabledBrowsers: [Browser]
     let disabledBrowserCount: Int
     let ruleCount: Int
@@ -24,6 +25,8 @@ struct DiagnosticsSnapshot: Equatable {
             "- Version: \(applicationVersion) (\(applicationBuild))",
             "- macOS: \(macOSVersion)",
             "- Location: \(applicationLocation.rawValue)",
+            "Launch",
+            "- At login: \(launchAtLoginText)",
             "Default handlers",
             "- HTTP: \(handlerText(for: defaultBrowserStatus.http))",
             "- HTTPS: \(handlerText(for: defaultBrowserStatus.https))",
@@ -60,6 +63,15 @@ struct DiagnosticsSnapshot: Equatable {
         lines.append("- HTTP: \(restorationSchemeText(restoration.http))")
         lines.append("- HTTPS: \(restorationSchemeText(restoration.https))")
         return lines.joined(separator: "\n")
+    }
+
+    private var launchAtLoginText: String {
+        switch launchAtLoginStatus {
+        case .disabled: "disabled"
+        case .enabled: "enabled"
+        case .requiresApproval: "requires approval"
+        case .unavailable: "unavailable"
+        }
     }
 
     private func handlerText(for identity: DefaultBrowserDiagnosticStatus.HandlerIdentity) -> String {

@@ -136,6 +136,74 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         await assertEventuallyIdle(coordinator)
     }
 
+    // V1-A Task 5: incomplete versioned setup is presented once only after the
+    // ordinary launch infrastructure has been initialized. A repeated AppKit launch
+    // notification is not a second onboarding presentation.
+    func testLaunchPresentsIncompleteSetupOnceAndStillRestoresInfrastructure() {
+        let setupStore = AppDelegateSetupStateStore(needsSetup: true)
+        let restorer = HandlerPreservationRestoreRecorder()
+        var settingsPresentationCount = 0
+        let delegate = makeDelegate(
+            settingsPresenter: { settingsPresentationCount += 1 },
+            handlerPreservationRestoring: restorer,
+            setupStateStore: setupStore
+        )
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        XCTAssertEqual(restorer.restoreCallCount, 1)
+        XCTAssertEqual(setupStore.needsSetupCallVersions, [1])
+        XCTAssertEqual(settingsPresentationCount, 1)
+        XCTAssertTrue(setupStore.markedVersions.isEmpty)
+    }
+
+    // V1-A Task 5 migration: an existing preferences domain without the independent
+    // completion marker is still setup-incomplete; a completed marker suppresses only
+    // automatic setup on that later process launch.
+    func testLaunchPresentsMarkerlessSetupButNotCompletedSetupOnLaterProcess() {
+        let markerlessStore = AppDelegateSetupStateStore(needsSetup: true)
+        var markerlessPresentations = 0
+        let firstProcess = makeDelegate(
+            settingsPresenter: { markerlessPresentations += 1 },
+            setupStateStore: markerlessStore
+        )
+        firstProcess.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        let completedStore = AppDelegateSetupStateStore(needsSetup: false)
+        var completedPresentations = 0
+        let laterProcess = makeDelegate(
+            settingsPresenter: { completedPresentations += 1 },
+            setupStateStore: completedStore
+        )
+        laterProcess.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        XCTAssertEqual(markerlessPresentations, 1)
+        XCTAssertEqual(completedPresentations, 0)
+        XCTAssertTrue(markerlessStore.markedVersions.isEmpty)
+        XCTAssertTrue(completedStore.markedVersions.isEmpty)
+    }
+
+    // V1-A Task 5 regression: opening Settings for setup must not intercept or
+    // rewrite an incoming HTTP(S) link delivered while Settings is visible.
+    func testIncomingURLDeliveryRemainsFunctionalWhileIncompleteSetupIsPresented() {
+        let destination = RecordingDestination()
+        let incomingURL = URL(string: "https://example.com/path%20with%20encoding?x=1#fragment")!
+        var settingsPresentationCount = 0
+        let delegate = makeDelegate(
+            handler: IncomingURLHandler(destination: destination),
+            settingsPresenter: { settingsPresentationCount += 1 },
+            setupStateStore: AppDelegateSetupStateStore(needsSetup: true)
+        )
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.application(NSApplication.shared, open: [incomingURL])
+
+        XCTAssertEqual(settingsPresentationCount, 1)
+        XCTAssertEqual(destination.receivedURLs, [incomingURL])
+        XCTAssertEqual(destination.receivedURLs.first?.absoluteString, incomingURL.absoluteString)
+    }
+
     func testManualUntitledOpenAndReopenWhileIdlePresentSettingsAndSuppressUntitledWindows() {
         var settingsPresentationCount = 0
         let delegate = makeDelegate(settingsPresenter: { settingsPresentationCount += 1 })
@@ -292,7 +360,8 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         handler: IncomingURLHandler,
         settingsPresenter: (() -> Void)? = nil,
         updateChecker: (any UpdateChecking)? = nil,
-        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil,
+        setupStateStore: (any SetupStateStore)? = nil
     ) -> AppDelegate {
         let coordinator = coordinator ?? SelectionCoordinator(
             discoveryService: EmptyDiscoveryService(),
@@ -309,14 +378,16 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
             chooserPanelController: panelController,
             settingsPresenter: settingsPresenter,
             updateChecking: updateChecking,
-            handlerPreservationRestoring: handlerPreservationRestoring
+            handlerPreservationRestoring: handlerPreservationRestoring,
+            setupStateStore: setupStateStore
         )
     }
 
     private func makeDelegate(
         settingsPresenter: @escaping () -> Void,
         updateChecker: (any UpdateChecking)? = nil,
-        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil,
+        setupStateStore: (any SetupStateStore)? = nil
     ) -> AppDelegate {
         let coordinator = SelectionCoordinator(
             discoveryService: EmptyDiscoveryService(),
@@ -327,7 +398,8 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
             handler: IncomingURLHandler(destination: coordinator),
             settingsPresenter: settingsPresenter,
             updateChecker: updateChecker,
-            handlerPreservationRestoring: handlerPreservationRestoring
+            handlerPreservationRestoring: handlerPreservationRestoring,
+            setupStateStore: setupStateStore
         )
     }
 
@@ -438,6 +510,25 @@ private final class HandlerPreservationRestoreRecorder: HandlerPreservationResto
 
     func restorePreservedHandlersIfNeeded() {
         restoreCallCount += 1
+    }
+}
+
+private final class AppDelegateSetupStateStore: SetupStateStore {
+    let needsSetupValue: Bool
+    private(set) var needsSetupCallVersions: [Int] = []
+    private(set) var markedVersions: [Int] = []
+
+    init(needsSetup: Bool) {
+        needsSetupValue = needsSetup
+    }
+
+    func needsSetup(currentVersion: Int) -> Bool {
+        needsSetupCallVersions.append(currentVersion)
+        return needsSetupValue
+    }
+
+    func markSetupCompleted(version: Int) throws {
+        markedVersions.append(version)
     }
 }
 

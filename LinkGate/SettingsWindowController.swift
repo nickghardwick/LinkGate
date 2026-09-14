@@ -6,12 +6,13 @@ final class SettingsWindowController: NSWindowController {
     private let model: RoutingSettingsModel
     private var observers: [NSObjectProtocol] = []
     private let workspaceNotificationCenter = NSWorkspace.shared.notificationCenter
+    private var applicationActivationObserver: NSObjectProtocol?
     private var hasCenteredWindow = false
 
     init(model: RoutingSettingsModel) {
         self.model = model
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -21,6 +22,13 @@ final class SettingsWindowController: NSWindowController {
         window.contentView = NSHostingView(rootView: RoutingSettingsView(model: model))
         super.init(window: window)
         observeBrowserInventoryChanges()
+        observeApplicationActivation()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowWillClose(_:)),
+            name: NSWindow.willCloseNotification,
+            object: window
+        )
     }
 
     required init?(coder: NSCoder) {
@@ -29,6 +37,10 @@ final class SettingsWindowController: NSWindowController {
 
     deinit {
         observers.forEach(workspaceNotificationCenter.removeObserver)
+        if let applicationActivationObserver {
+            NotificationCenter.default.removeObserver(applicationActivationObserver)
+        }
+        NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
     }
 
     override func showWindow(_ sender: Any?) {
@@ -40,6 +52,10 @@ final class SettingsWindowController: NSWindowController {
         }
         window?.makeKeyAndOrderFront(sender)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func windowWillClose(_ notification: Notification) {
+        model.dismissSetupForCurrentProcess()
     }
 
     private func observeBrowserInventoryChanges() {
@@ -55,5 +71,18 @@ final class SettingsWindowController: NSWindowController {
             workspaceNotificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main, using: refresh),
             workspaceNotificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: refresh),
         ]
+    }
+
+    private func observeApplicationActivation() {
+        applicationActivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: NSApp,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.window?.isVisible == true else { return }
+                self.model.refresh()
+            }
+        }
     }
 }

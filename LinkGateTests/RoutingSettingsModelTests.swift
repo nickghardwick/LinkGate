@@ -518,6 +518,249 @@ final class RoutingSettingsModelTests: XCTestCase {
         XCTAssertFalse(model.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     }
 
+    // V1-A Task 3: status is an OS-derived value. Refresh must read every supported
+    // domain state and must not turn an approval requirement into a generic error.
+    func testRefreshPublishesEveryLaunchAtLoginDomainStatus() {
+        for expectedStatus in [
+            LaunchAtLoginStatus.disabled,
+            .enabled,
+            .requiresApproval,
+            .unavailable,
+        ] {
+            let launchService = RecordingLaunchAtLoginService(status: expectedStatus)
+            let model = RoutingSettingsModel(
+                ruleStore: makeStore(),
+                discoveryService: SettingsFakeDiscovery(results: []),
+                launchAtLoginService: launchService,
+                setupStateStore: RecordingSetupStateStore(needsSetup: false)
+            )
+
+            model.refresh()
+
+            XCTAssertEqual(model.launchAtLoginStatus, expectedStatus)
+            XCTAssertGreaterThanOrEqual(launchService.statusCallCount, 1)
+            XCTAssertNil(model.errorMessage)
+        }
+    }
+
+    // V1-A Tasks 3 and 6: the requested state is never assumed. Both a user action
+    // and a later Settings refresh must publish the service's next queried state.
+    func testLaunchAtLoginEnableAndDisableRequeryActualStatus() {
+        let launchService = RecordingLaunchAtLoginService(status: .disabled)
+        let model = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: launchService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        model.refresh()
+        let callsBeforeEnable = launchService.statusCallCount
+
+        model.setLaunchAtLoginEnabled(true)
+
+        XCTAssertEqual(launchService.enableCallCount, 1)
+        XCTAssertEqual(launchService.statusCallCount, callsBeforeEnable + 1)
+        XCTAssertEqual(model.launchAtLoginStatus, .enabled)
+
+        let callsBeforeDisable = launchService.statusCallCount
+        model.setLaunchAtLoginEnabled(false)
+
+        XCTAssertEqual(launchService.disableCallCount, 1)
+        XCTAssertEqual(launchService.statusCallCount, callsBeforeDisable + 1)
+        XCTAssertEqual(model.launchAtLoginStatus, .disabled)
+
+        launchService.statusToReturn = .requiresApproval
+        model.refresh()
+        XCTAssertEqual(model.launchAtLoginStatus, .requiresApproval)
+
+        launchService.statusToReturn = .disabled
+        model.refresh()
+        XCTAssertEqual(model.launchAtLoginStatus, .disabled)
+    }
+
+    // V1-A Task 3: redundant requests and development/noncanonical copies must not
+    // mutate real registration state at LinkGate's boundary.
+    func testLaunchAtLoginRequestsAreNoOpsWhenAlreadyInRequestedStateOrMutationIsProhibited() {
+        let enabledService = RecordingLaunchAtLoginService(status: .enabled)
+        let enabledModel = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: enabledService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        enabledModel.refresh()
+        enabledModel.setLaunchAtLoginEnabled(true)
+        XCTAssertEqual(enabledService.enableCallCount, 0)
+        XCTAssertEqual(enabledModel.launchAtLoginStatus, .enabled)
+
+        let disabledService = RecordingLaunchAtLoginService(status: .disabled)
+        let disabledModel = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: disabledService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        disabledModel.refresh()
+        disabledModel.setLaunchAtLoginEnabled(false)
+        XCTAssertEqual(disabledService.disableCallCount, 0)
+        XCTAssertEqual(disabledModel.launchAtLoginStatus, .disabled)
+
+        let developmentService = RecordingLaunchAtLoginService(
+            status: .disabled,
+            canChangeRegistration: false
+        )
+        let developmentModel = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: developmentService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        developmentModel.refresh()
+        developmentModel.setLaunchAtLoginEnabled(true)
+        XCTAssertEqual(developmentService.enableCallCount, 0)
+        XCTAssertEqual(developmentModel.launchAtLoginStatus, .disabled)
+    }
+
+    // V1-A Task 3: failures still re-query the operating system and expose only a
+    // safe user-facing message. Approval is a state, never a failed registration.
+    func testLaunchAtLoginFailureRequeriesStatusAndSanitizesError() {
+        let unsafeDetail = "registration failed at /Users/person/private-login-item"
+        let launchService = RecordingLaunchAtLoginService(
+            status: .disabled,
+            enableError: NSError(
+                domain: "LinkGateTests",
+                code: 9,
+                userInfo: [NSLocalizedDescriptionKey: unsafeDetail]
+            )
+        )
+        let model = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: launchService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        model.refresh()
+        let callsBeforeRequest = launchService.statusCallCount
+
+        model.setLaunchAtLoginEnabled(true)
+
+        XCTAssertEqual(launchService.enableCallCount, 1)
+        XCTAssertEqual(launchService.statusCallCount, callsBeforeRequest + 1)
+        XCTAssertEqual(model.launchAtLoginStatus, .disabled)
+        XCTAssertFalse(model.errorMessage?.contains(unsafeDetail) ?? true)
+        XCTAssertFalse(model.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+
+        launchService.enableError = nil
+        launchService.statusAfterEnable = .requiresApproval
+        model.setLaunchAtLoginEnabled(true)
+        XCTAssertEqual(model.launchAtLoginStatus, .requiresApproval)
+        XCTAssertNil(model.errorMessage)
+    }
+
+    // V1-A Task 3: unregistration has the same re-query and sanitization rule as
+    // registration; a failed disable cannot be reported as disabled optimistically.
+    func testLaunchAtLoginDisableFailureRequeriesStatusAndSanitizesError() {
+        let unsafeDetail = "unregistration failed at /Users/person/private-login-item"
+        let launchService = RecordingLaunchAtLoginService(
+            status: .enabled,
+            disableError: NSError(
+                domain: "LinkGateTests",
+                code: 10,
+                userInfo: [NSLocalizedDescriptionKey: unsafeDetail]
+            )
+        )
+        let model = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: launchService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        model.refresh()
+        let callsBeforeRequest = launchService.statusCallCount
+
+        model.setLaunchAtLoginEnabled(false)
+
+        XCTAssertEqual(launchService.disableCallCount, 1)
+        XCTAssertEqual(launchService.statusCallCount, callsBeforeRequest + 1)
+        XCTAssertEqual(model.launchAtLoginStatus, .enabled)
+        XCTAssertFalse(model.errorMessage?.contains(unsafeDetail) ?? true)
+        XCTAssertFalse(model.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    }
+
+    func testLaunchAtLoginApprovalActionDelegatesWithoutChangingStatus() {
+        let launchService = RecordingLaunchAtLoginService(status: .requiresApproval)
+        let model = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: launchService,
+            setupStateStore: RecordingSetupStateStore(needsSetup: false)
+        )
+        model.refresh()
+
+        model.openLoginItemsSettings()
+
+        XCTAssertEqual(launchService.openSettingsCallCount, 1)
+        XCTAssertEqual(model.launchAtLoginStatus, .requiresApproval)
+    }
+
+    // V1-A Task 3: setup status is independent from browser/default/login actions.
+    // Only Done asks the durable store to complete the current version.
+    func testSetupCompletionIsExplicitAndPersistenceFailureOnlyDismissesThisProcess() {
+        let requiredStore = RecordingSetupStateStore(needsSetup: true)
+        let model = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: RecordingLaunchAtLoginService(status: .disabled),
+            setupStateStore: requiredStore
+        )
+
+        model.refresh()
+        XCTAssertTrue(model.setupIsIncomplete)
+        model.completeSetup()
+        XCTAssertEqual(requiredStore.markedVersions, [1])
+        XCTAssertFalse(model.setupIsIncomplete)
+
+        let failingStore = RecordingSetupStateStore(
+            needsSetup: true,
+            markError: NSError(domain: "LinkGateTests", code: 11)
+        )
+        let failingModel = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            launchAtLoginService: RecordingLaunchAtLoginService(status: .disabled),
+            setupStateStore: failingStore
+        )
+        failingModel.refresh()
+        failingModel.completeSetup()
+        XCTAssertEqual(failingStore.markedVersions, [1])
+        XCTAssertFalse(failingModel.setupIsIncomplete)
+        XCTAssertFalse(failingStore.durablyCompleted)
+    }
+
+    // V1-A Task 3: no operational action is an onboarding acknowledgement.
+    func testOperationalActionsAndRefreshDoNotCompleteSetup() {
+        let setupStore = RecordingSetupStateStore(needsSetup: true)
+        let launchService = RecordingLaunchAtLoginService(status: .disabled)
+        let defaultService = RecordingDefaultBrowserService(
+            statusToReturn: DefaultBrowserStatus(httpIsDefault: false, httpsIsDefault: false)
+        )
+        let model = RoutingSettingsModel(
+            ruleStore: makeStore(),
+            discoveryService: SettingsFakeDiscovery(results: []),
+            defaultBrowserService: defaultService,
+            launchAtLoginService: launchService,
+            setupStateStore: setupStore
+        )
+        model.refresh()
+        model.setLaunchAtLoginEnabled(true)
+        model.requestDefaultBrowser()
+        defaultService.complete(.success(()))
+        model.refresh()
+
+        XCTAssertTrue(model.setupIsIncomplete)
+        XCTAssertTrue(setupStore.markedVersions.isEmpty)
+    }
+
     func testDeleteRulesAtMultipleDisplayedOffsetsPreservesCorrectSurvivorOrder() throws {
         let store = makeStore()
         let first = try store.create(matchType: .exactDomain, pattern: "first.example", browserBundleIdentifier: "com.example.first")
@@ -641,5 +884,75 @@ private final class RecordingDefaultBrowserService: DefaultBrowserService {
         let completion = completion
         self.completion = nil
         completion?(result)
+    }
+}
+
+@MainActor
+private final class RecordingLaunchAtLoginService: LaunchAtLoginService {
+    var statusToReturn: LaunchAtLoginStatus
+    var canChangeRegistration: Bool
+    var enableError: Error?
+    var disableError: Error?
+    var statusAfterEnable: LaunchAtLoginStatus?
+    var statusAfterDisable: LaunchAtLoginStatus?
+    private(set) var statusCallCount = 0
+    private(set) var enableCallCount = 0
+    private(set) var disableCallCount = 0
+    private(set) var openSettingsCallCount = 0
+
+    init(
+        status: LaunchAtLoginStatus,
+        canChangeRegistration: Bool = true,
+        enableError: Error? = nil,
+        disableError: Error? = nil
+    ) {
+        statusToReturn = status
+        self.canChangeRegistration = canChangeRegistration
+        self.enableError = enableError
+        self.disableError = disableError
+    }
+
+    var status: LaunchAtLoginStatus {
+        statusCallCount += 1
+        return statusToReturn
+    }
+
+    func enable() throws {
+        enableCallCount += 1
+        if let enableError { throw enableError }
+        statusToReturn = statusAfterEnable ?? .enabled
+    }
+
+    func disable() throws {
+        disableCallCount += 1
+        if let disableError { throw disableError }
+        statusToReturn = statusAfterDisable ?? .disabled
+    }
+
+    func openLoginItemsSettings() {
+        openSettingsCallCount += 1
+    }
+}
+
+private final class RecordingSetupStateStore: SetupStateStore {
+    var needsSetupValue: Bool
+    var markError: Error?
+    private(set) var markedVersions: [Int] = []
+    private(set) var durablyCompleted = false
+
+    init(needsSetup: Bool, markError: Error? = nil) {
+        needsSetupValue = needsSetup
+        self.markError = markError
+    }
+
+    func needsSetup(currentVersion: Int) -> Bool {
+        needsSetupValue
+    }
+
+    func markSetupCompleted(version: Int) throws {
+        markedVersions.append(version)
+        if let markError { throw markError }
+        durablyCompleted = true
+        needsSetupValue = false
     }
 }

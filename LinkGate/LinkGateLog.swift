@@ -7,5 +7,6 @@ enum LinkGateLog {
     static let routing = Logger(subsystem: subsystem, category: "routing")
     static let browser = Logger(subsystem: subsystem, category: "browser")
     static let defaultBrowser = Logger(subsystem: subsystem, category: "default-browser")
+    static let launchAtLogin = Logger(subsystem: subsystem, category: "launch-at-login")
     static let updater = Logger(subsystem: subsystem, category: "updater")
 }

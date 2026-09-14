@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let updateChecking: any UpdateChecking
     private let handlerPreservationRestoring: (any HandlerPreservationRestoring)?
     private let diagnosticsController: DiagnosticsController?
+    private let setupStateStore: (any SetupStateStore)?
     private var statusItemController: StatusItemController?
 
     override init() {
@@ -27,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let openingService = NSWorkspaceBrowserOpeningService()
         let routingRuleStore = UserDefaultsRoutingRuleStore()
         let defaultBrowserService = NSWorkspaceDefaultBrowserService()
+        let launchAtLoginService = SMAppServiceLaunchAtLoginService()
+        let setupStateStore = UserDefaultsSetupStateStore()
         let coordinator = SelectionCoordinator(
             discoveryService: discoveryService,
             openingService: openingService,
@@ -45,10 +48,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             model: RoutingSettingsModel(
                 ruleStore: routingRuleStore,
                 discoveryService: discoveryService,
-                defaultBrowserService: defaultBrowserService
+                defaultBrowserService: defaultBrowserService,
+                launchAtLoginService: launchAtLoginService,
+                setupStateStore: setupStateStore
             )
         )
         settingsPresenter = { settingsController.showWindow(nil) }
+        self.setupStateStore = setupStateStore
         self.updateController = updateController
         updateChecking = updateController
         handlerPreservationRestoring = updateController
@@ -57,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ruleStore: routingRuleStore,
             browserDiscovery: discoveryService,
             defaultBrowserStatus: { defaultBrowserService.diagnosticStatus() },
+            launchAtLoginStatus: { launchAtLoginService.status },
             updateDiagnosticState: { updateController.diagnosticState },
             applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             applicationBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
@@ -74,7 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         browserDiscoveryService: BrowserDiscoveryService? = nil,
         settingsPresenter: (() -> Void)? = nil,
         updateChecking: any UpdateChecking,
-        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil
+        handlerPreservationRestoring: (any HandlerPreservationRestoring)? = nil,
+        setupStateStore: (any SetupStateStore)? = nil
     ) {
         self.routingRuleStore = routingRuleStore ?? UserDefaultsRoutingRuleStore()
         self.browserDiscoveryService = browserDiscoveryService ?? NSWorkspaceBrowserDiscoveryService(
@@ -90,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.updateController = nil
         self.updateChecking = updateChecking
         self.handlerPreservationRestoring = handlerPreservationRestoring
+        self.setupStateStore = setupStateStore
         diagnosticsController = nil
         super.init()
     }
@@ -112,6 +121,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             copyDiagnostics: { [weak self] in self?.diagnosticsController?.copyDiagnostics() },
             applicationTerminator: { NSApp.terminate(nil) }
         )
+
+        if setupStateStore?.needsSetup(currentVersion: currentSetupVersion) == true {
+            LinkGateLog.app.info("First-run setup presented")
+            showSettings()
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

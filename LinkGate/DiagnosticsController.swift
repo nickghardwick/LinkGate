@@ -5,6 +5,7 @@ final class DiagnosticsController {
     private let ruleStore: RoutingRuleStore
     private let browserDiscovery: BrowserDiscoveryService
     private let defaultBrowserStatus: () -> DefaultBrowserDiagnosticStatus
+    private let launchAtLoginStatus: () -> LaunchAtLoginStatus
     private let updateDiagnosticState: () -> UpdateDiagnosticState
     private let applicationVersion: String
     private let applicationBuild: String
@@ -15,6 +16,7 @@ final class DiagnosticsController {
         ruleStore: RoutingRuleStore,
         browserDiscovery: BrowserDiscoveryService,
         defaultBrowserStatus: @escaping () -> DefaultBrowserDiagnosticStatus,
+        launchAtLoginStatus: @escaping () -> LaunchAtLoginStatus = { .unavailable },
         updateDiagnosticState: @escaping () -> UpdateDiagnosticState,
         applicationVersion: String,
         applicationBuild: String,
@@ -24,6 +26,7 @@ final class DiagnosticsController {
         self.ruleStore = ruleStore
         self.browserDiscovery = browserDiscovery
         self.defaultBrowserStatus = defaultBrowserStatus
+        self.launchAtLoginStatus = launchAtLoginStatus
         self.updateDiagnosticState = updateDiagnosticState
         self.applicationVersion = applicationVersion
         self.applicationBuild = applicationBuild
@@ -53,6 +56,7 @@ final class DiagnosticsController {
             macOSVersion: macOSVersion,
             applicationLocation: DiagnosticLocation.classification(for: applicationURL),
             defaultBrowserStatus: defaultBrowserStatus(),
+            launchAtLoginStatus: launchAtLoginStatus(),
             enabledBrowsers: diagnosticBrowsers(
                 from: visibleCandidates,
                 duplicateBundleIdentifiers: duplicateBundleIdentifiers(in: candidates)

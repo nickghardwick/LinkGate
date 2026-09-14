@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 import SwiftUI
 
 @MainActor
@@ -9,25 +10,41 @@ final class RoutingSettingsModel: ObservableObject {
     @Published private(set) var detectedBrowsers: [ApplicationCandidate] = []
     @Published private(set) var defaultBrowserStatus = DefaultBrowserStatus(httpIsDefault: false, httpsIsDefault: false)
     @Published private(set) var isRequestingDefault = false
+    @Published private(set) var launchAtLoginStatus: LaunchAtLoginStatus
+    @Published private(set) var isChangingLaunchAtLogin = false
+    @Published private(set) var setupIsIncomplete: Bool
     @Published private(set) var errorMessage: String?
 
     private let ruleStore: RoutingRuleStore
     private let discoveryService: BrowserDiscoveryService
     private let defaultBrowserService: DefaultBrowserService?
+    private let launchAtLoginService: LaunchAtLoginService?
+    private let setupStateStore: SetupStateStore?
     private var ruleTargetApplicationURLs: [String: URL] = [:]
+    private var setupWasDismissedInThisProcess = false
 
     init(
         ruleStore: RoutingRuleStore,
         discoveryService: BrowserDiscoveryService,
-        defaultBrowserService: DefaultBrowserService? = nil
+        defaultBrowserService: DefaultBrowserService? = nil,
+        launchAtLoginService: LaunchAtLoginService? = nil,
+        setupStateStore: SetupStateStore? = nil
     ) {
         self.ruleStore = ruleStore
         self.discoveryService = discoveryService
         self.defaultBrowserService = defaultBrowserService
+        self.launchAtLoginService = launchAtLoginService
+        self.setupStateStore = setupStateStore
         rules = ruleStore.rules
+        launchAtLoginStatus = launchAtLoginService?.status ?? .unavailable
+        setupIsIncomplete = setupStateStore?.needsSetup(currentVersion: currentSetupVersion) ?? false
     }
 
     var storageWarning: String? { ruleStore.storageWarning }
+
+    var canChangeLaunchAtLogin: Bool {
+        launchAtLoginService?.canChangeRegistration == true
+    }
 
     func refresh() {
         rules = ruleStore.rules
@@ -49,6 +66,10 @@ final class RoutingSettingsModel: ObservableObject {
         updateBrowserChoices()
         if let defaultBrowserService {
             defaultBrowserStatus = defaultBrowserService.status()
+        }
+        refreshLaunchAtLoginStatus()
+        if !setupWasDismissedInThisProcess {
+            setupIsIncomplete = setupStateStore?.needsSetup(currentVersion: currentSetupVersion) ?? false
         }
     }
 
@@ -230,11 +251,79 @@ final class RoutingSettingsModel: ObservableObject {
         }
     }
 
+    func setLaunchAtLoginEnabled(_ enabled: Bool) {
+        guard !isChangingLaunchAtLogin,
+              canChangeLaunchAtLogin,
+              launchAtLoginStatus == .disabled || launchAtLoginStatus == .enabled,
+              (enabled && launchAtLoginStatus != .enabled) || (!enabled && launchAtLoginStatus != .disabled),
+              let launchAtLoginService
+        else {
+            return
+        }
+
+        isChangingLaunchAtLogin = true
+        defer {
+            isChangingLaunchAtLogin = false
+        }
+
+        do {
+            if enabled {
+                try launchAtLoginService.enable()
+            } else {
+                try launchAtLoginService.disable()
+            }
+            refreshLaunchAtLoginStatus()
+            errorMessage = nil
+        } catch {
+            refreshLaunchAtLoginStatus()
+            if launchAtLoginStatus == .requiresApproval {
+                errorMessage = nil
+            } else {
+                errorMessage = safeMessage(
+                    for: error,
+                    fallback: enabled
+                        ? "LinkGate could not be enabled at login."
+                        : "LinkGate could not be disabled at login."
+                )
+            }
+        }
+    }
+
+    func openLoginItemsSettings() {
+        launchAtLoginService?.openLoginItemsSettings()
+    }
+
+    func completeSetup() {
+        dismissSetupForCurrentProcess()
+        guard let setupStateStore else { return }
+
+        do {
+            try setupStateStore.markSetupCompleted(version: currentSetupVersion)
+            LinkGateLog.app.info("First-run setup completed")
+            errorMessage = nil
+        } catch {
+            LinkGateLog.app.error("First-run setup completion failed category=setup-persistence-failed")
+            errorMessage = safeMessage(for: error, fallback: "LinkGate could not save setup completion.")
+        }
+    }
+
+    func dismissSetupForCurrentProcess() {
+        guard setupIsIncomplete else { return }
+        setupWasDismissedInThisProcess = true
+        setupIsIncomplete = false
+    }
+
     private func safeMessage(for error: Error, fallback: String = "The routing rules could not be updated.") -> String {
         if error is RoutingRuleValidationError || error is RoutingRuleStorageError {
             return error.localizedDescription
         }
         return fallback
+    }
+
+    private func refreshLaunchAtLoginStatus() {
+        if let launchAtLoginService {
+            launchAtLoginStatus = launchAtLoginService.status
+        }
     }
 
     private func persistNewBrowserIdentifiersIfNeeded(in discoveredBrowsers: [ApplicationCandidate]) {

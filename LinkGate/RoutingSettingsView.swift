@@ -10,15 +10,51 @@ struct RoutingSettingsView: View {
     }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 12) {
-            GroupBox("Default browser") {
-                HStack {
-                    Text(defaultStatusText)
-                    Spacer()
-                    Button("Make LinkGate Default") { model.requestDefaultBrowser() }
-                        .disabled(model.isRequestingDefault || model.defaultBrowserStatus.isDefault)
-                        .accessibilityLabel("Make LinkGate the default browser for HTTP and HTTPS")
+            if model.setupIsIncomplete {
+                GroupBox("Set up LinkGate") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("LinkGate needs to handle HTTP and HTTPS links to receive them.")
+                        defaultBrowserControls
+                        Text(detectedBrowsersSummary)
+                            .foregroundStyle(.secondary)
+                        Text("Launch at Login is recommended, but optional. You can change it below.")
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Spacer()
+                            Button("Done") { model.completeSetup() }
+                                .keyboardShortcut(.defaultAction)
+                        }
+                    }
+                    .padding(.vertical, 2)
                 }
+            }
+            GroupBox("General") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Launch LinkGate at Login", isOn: Binding(
+                        get: { model.launchAtLoginStatus == .enabled },
+                        set: { model.setLaunchAtLoginEnabled($0) }
+                    ))
+                    .disabled(!model.canChangeLaunchAtLogin || model.isChangingLaunchAtLogin ||
+                              model.launchAtLoginStatus == .unavailable || model.launchAtLoginStatus == .requiresApproval)
+                    if !model.canChangeLaunchAtLogin {
+                        Text("Launch at Login can only be changed from the installed LinkGate copy.")
+                            .foregroundStyle(.secondary)
+                    }
+                    if model.launchAtLoginStatus == .requiresApproval {
+                        Text("Approve LinkGate in Login Items to allow automatic launch.")
+                            .foregroundStyle(.secondary)
+                        Button("Open Login Items Settings…") { model.openLoginItemsSettings() }
+                    } else if model.launchAtLoginStatus == .unavailable {
+                        Text("Launch at Login is unavailable for this copy.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            GroupBox("Default browser") {
+                defaultBrowserControls
                 .padding(.vertical, 2)
             }
             GroupBox("Browsers") {
@@ -47,7 +83,7 @@ struct RoutingSettingsView: View {
                             _ = model.moveBrowsers(from: offsets, to: destination)
                         }
                     }
-                    .frame(minHeight: 120, maxHeight: .infinity)
+                    .frame(height: 150)
                     .layoutPriority(1)
                 }
             }
@@ -96,12 +132,28 @@ struct RoutingSettingsView: View {
             }
         }
         .padding()
-        .frame(minWidth: 520, minHeight: 320)
+        .frame(minWidth: 520, minHeight: 600)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear(perform: model.refresh)
+        }
         .sheet(isPresented: $showingEditor) {
             RoutingRuleEditor(model: model, rule: editingRule, isPresented: $showingEditor)
         }
+    }
+
+    private var defaultBrowserControls: some View {
+        HStack {
+            Text(defaultStatusText)
+            Spacer()
+            Button("Make/Repair LinkGate Default") { model.requestDefaultBrowser() }
+                .disabled(model.isRequestingDefault || model.defaultBrowserStatus.isDefault)
+                .accessibilityLabel("Make LinkGate the default browser for HTTP and HTTPS")
+        }
+    }
+
+    private var detectedBrowsersSummary: String {
+        let names = model.detectedBrowsers.map(\.displayName)
+        if names.isEmpty { return "No supported browsers detected yet." }
+        return "Detected browsers: \(names.joined(separator: ", "))."
     }
 
     private var defaultStatusText: String {

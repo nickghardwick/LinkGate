@@ -8,6 +8,7 @@ from dataclasses import replace
 import hashlib
 import json
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from scripts.release.publish_beta.appcast import AppcastFeed, serialize_appcast
 from scripts.release.publish_beta.config import load_config
@@ -28,7 +29,7 @@ from scripts.release.publish_beta.orchestrator import (
     orchestrate,
 )
 from scripts.release.publish_beta.pages import PagesStageResult
-from scripts.release.publish_beta.preflight import PreflightCategory, PreflightFinding, PreflightReport
+from scripts.release.publish_beta.preflight import HttpResponse, PreflightCategory, PreflightFinding, PreflightReport
 
 
 COMMIT = "a" * 40
@@ -305,27 +306,40 @@ class AdapterTests(unittest.TestCase):
             class RecordingSigner:
                 def __init__(self, runner, executable, account="ed25519", private_key_file=None):
                     captured["signer"] = account
+                    captured["signer_path"] = executable
 
             class RecordingVerifier:
                 def __init__(self, runner, sign_update, openssl, account="ed25519", private_key_file=None):
                     captured["verifier"] = account
+                    captured["verifier_sign_update_path"] = sign_update
+                    captured["verifier_openssl_path"] = openssl
 
-            class Tools:
-                def find(self, name):
-                    return f"/fake/{name}"
+            staged_result = replace(
+                staged(),
+                preflight_context=SimpleNamespace(
+                    sign_update_path="/validated/sign_update",
+                    openssl_path="/validated/openssl",
+                ),
+            )
 
             with patch("scripts.release.publish_beta.orchestrator.SignUpdateAdapter", RecordingSigner), \
                  patch("scripts.release.publish_beta.orchestrator.SparkleSignatureVerifier", RecordingVerifier), \
                  patch("scripts.release.publish_beta.orchestrator.stage_staged_draft_content", return_value="staged"):
-                result = DefaultContentStager(object(), Tools()).stage(
+                result = DefaultContentStager(object()).stage(
                     root,
                     config_path,
-                    staged(),
+                    staged_result,
                     PagesSourceState(None, None),
                 )
 
             self.assertEqual(result, "staged")
-            self.assertEqual(captured, {"signer": "LinkGate", "verifier": "LinkGate"})
+            self.assertEqual(captured, {
+                "signer": "LinkGate",
+                "verifier": "LinkGate",
+                "signer_path": "/validated/sign_update",
+                "verifier_sign_update_path": "/validated/sign_update",
+                "verifier_openssl_path": "/validated/openssl",
+            })
 
     def test_pages_push_checks_expected_tip_and_publishes_exact_commit_without_force(self) -> None:
         class Runner:
@@ -375,7 +389,14 @@ class AdapterTests(unittest.TestCase):
             (workspace / "updates/releases").mkdir(parents=True)
             (workspace / "updates/appcast.xml").write_bytes(expected_feed)
             (workspace / "updates/releases/0.1.4.html").write_bytes(notes)
-            stage = replace(pages(), workspace=workspace, appcast_sha256=hashlib.sha256(expected_feed).hexdigest(), release_notes_sha256=hashlib.sha256(notes).hexdigest())
+            stage = replace(
+                pages(),
+                workspace=workspace,
+                appcast_sha256=hashlib.sha256(expected_feed).hexdigest(),
+                release_notes_sha256=hashlib.sha256(notes).hexdigest(),
+                sign_update_path="/fake/sign_update",
+                openssl_path="/fake/openssl",
+            )
             stale = expected_feed.replace(b"LinkGate", b"OldGate", 1)
             from scripts.release.publish_beta.preflight import HttpResponse
             http = Http({
@@ -383,11 +404,67 @@ class AdapterTests(unittest.TestCase):
                 candidate.appcast_url: [HttpResponse(200, stale), HttpResponse(200, expected_feed)],
                 "https://example.github.io/linkgate/updates/releases/0.1.4.html": [HttpResponse(200, notes)],
             })
-            acceptance = DefaultPublicVerifier(config, http, sleeper=lambda _: None).verify(
+            class Verifier:
+                def __init__(self):
+                    self.calls = []
+
+                def verify(self, archive, signature, public_key):
+                    self.calls.append((archive, signature, public_key))
+
+            verifier = Verifier()
+            acceptance = DefaultPublicVerifier(config, http, sleeper=lambda _: None, signature_verifier=verifier).verify(
                 candidate, stage, PublishedRelease("https://github.com/example/linkgate/releases/tag/v0.1.4", "2026-09-12T12:31:00Z")
             )
             self.assertEqual(acceptance.dmg_sha256, dmg_fact.sha256)
             self.assertEqual(http.calls.count(candidate.appcast_url), 2)
+            self.assertEqual(len(verifier.calls), 1)
+
+    def test_public_verifier_rejects_an_invalid_sparkle_signature(self) -> None:
+        from scripts.release.tests.test_staging import config_value, item
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(config_value()), encoding="utf-8")
+            config = load_config(config_path)
+            dmg = b"twelve bytes"
+            dmg_fact = AssetFact("LinkGate-0.1.4.dmg", len(dmg), hashlib.sha256(dmg).hexdigest())
+            candidate = replace(record(), assets=(dmg_fact, CHECKSUM, MANIFEST))
+            invalid_item = replace(item("0.1.4", "6"), ed_signature="invalid-signature")
+            invalid_feed = serialize_appcast(AppcastFeed("Beta", candidate.appcast_url, "Updates", (invalid_item,)))
+            workspace = root / "pages"
+            (workspace / "updates/releases").mkdir(parents=True)
+            (workspace / "updates/appcast.xml").write_bytes(invalid_feed)
+            (workspace / "updates/releases/0.1.4.html").write_bytes(b"<html>release</html>")
+            stage = replace(
+                pages(),
+                workspace=workspace,
+                appcast_sha256=hashlib.sha256(invalid_feed).hexdigest(),
+                release_notes_sha256=hashlib.sha256(b"<html>release</html>").hexdigest(),
+                sign_update_path="/fake/sign_update",
+                openssl_path="/fake/openssl",
+            )
+            class Http:
+                def __init__(self, responses):
+                    self.responses = responses
+
+                def get(self, url, timeout):
+                    return self.responses[url]
+
+            http = Http({
+                "https://github.com/example/linkgate/releases/download/v0.1.4/LinkGate-0.1.4.dmg": HttpResponse(200, dmg),
+                candidate.appcast_url: HttpResponse(200, invalid_feed),
+                "https://example.github.io/linkgate/updates/releases/0.1.4.html": HttpResponse(200, b"<html>release</html>"),
+            })
+            with patch("scripts.release.publish_beta.orchestrator.SparkleSignatureVerifier") as verifier:
+                verifier.return_value.verify.side_effect = PublicationError(FailureClass.TRUST, "invalid signature")
+                with self.assertRaises(PublicationError):
+                    DefaultPublicVerifier(config, http, sleeper=lambda _: None).verify(
+                        candidate,
+                        stage,
+                        PublishedRelease("https://github.com/example/linkgate/releases/tag/v0.1.4", "2026-09-12T12:31:00Z"),
+                    )
+                verifier.return_value.verify.assert_called_once()
 
     def test_evidence_writer_retains_facts_without_copying_the_dmg(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

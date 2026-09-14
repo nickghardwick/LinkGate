@@ -85,6 +85,13 @@ accepts it only when it matches the pinned binary digest. It does not download,
 extract, execute, or sign with the tool during preflight. The Sparkle archive
 and binary are not vendored in this repository.
 
+The preflight also runs a deterministic Ed25519 verification probe through the
+selected OpenSSL executable. This is a capability check rather than a pathname
+check; Apple’s `/usr/bin/openssl` LibreSSL build is rejected because it cannot
+load Ed25519 public keys. Install or expose a compatible OpenSSL 3.x executable
+in `PATH` before preflight. The same validated executable is carried through
+Sparkle staging and final public-resource verification.
+
 ## Content and Pages staging
 
 Step 7E prepares publication content only after Step 7D has produced a
@@ -161,3 +168,15 @@ Publication outcomes use stable exit codes:
 retained for manual follow-up. `MANUAL_RECOVERY_REQUIRED` means ownership or
 cleanup could not be established safely. The command never resumes a failed
 attempt.
+
+For an already-public immutable beta, run the read-only retrospective check
+with an explicit version, for example:
+
+```bash
+VERSION=0.1.4 make verify-published-beta
+```
+
+It verifies the public release, assets, appcast, release notes, Pages commit,
+official Sparkle verification, and independent Ed25519 verification. It does
+not modify GitHub, tags, releases, Pages, or `dist/`; it writes only a local
+follow-up record under `.scratch/publication-evidence/<version>/`.

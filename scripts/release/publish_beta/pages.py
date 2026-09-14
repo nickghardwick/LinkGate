@@ -25,6 +25,8 @@ class PagesStageResult:
     build_version: str
     publication_recorded_at: str
     workspace: Path
+    sign_update_path: str | None = None
+    openssl_path: str | None = None
 
 
 class PagesGit(Protocol):
@@ -106,6 +108,8 @@ def stage_pages(
     runner: CommandRunner | None = None,
     workspace_factory=tempfile.mkdtemp,
     existing_feed: bool | None = None,
+    sign_update_path: str | None = None,
+    openssl_path: str | None = None,
 ) -> PagesStageResult:
     command_runner = runner or SubprocessRunner()
     parse_appcast(appcast_xml)
@@ -158,6 +162,8 @@ def stage_pages(
             build_version=build,
             publication_recorded_at=publication_recorded_at,
             workspace=workspace,
+            sign_update_path=sign_update_path,
+            openssl_path=openssl_path,
         )
     except Exception:
         shutil.rmtree(workspace, ignore_errors=True)

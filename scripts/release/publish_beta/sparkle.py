@@ -21,6 +21,9 @@ _SIGNATURE_OUTPUT = re.compile(
     r'^sparkle:edSignature="(?P<signature>[A-Za-z0-9+/]+={0,2})" length="(?P<length>[0-9]+)"$'
 )
 _PUBLIC_KEY_DER_PREFIX = bytes.fromhex("302a300506032b6570032100")
+_OPENSSL_CAPABILITY_ARTIFACT = b"LinkGate Sparkle 2.9.6 interoperability fixture\n"
+_OPENSSL_CAPABILITY_PUBLIC_KEY = "ilzG6yMvd8qfr6pk2O9wV5GT/BjOFfQ5e5+2bJNpoK4="
+_OPENSSL_CAPABILITY_SIGNATURE = "FMrvQWb5U+/x/Pb9X9kji6h3b1NJwtfyGB0vljF7XQi/j7M/3Bmmfzf8cOE+lHdjhU7oS3z67qA2MylLL7x6Dg=="
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,60 @@ def _ed25519_spki_der(raw_public_key: bytes) -> bytes:
     if len(raw_public_key) != 32:
         raise PublicationError(FailureClass.CONFIGURATION, "configured Sparkle public key has invalid length")
     return _PUBLIC_KEY_DER_PREFIX + raw_public_key
+
+
+def _run_openssl_ed25519_verification(
+    runner: CommandRunner,
+    openssl: str,
+    archive: Path,
+    signature: bytes,
+    raw_public_key: bytes,
+) -> bool:
+    with tempfile.TemporaryDirectory(prefix="linkgate-openssl-verify-") as directory:
+        directory_path = Path(directory)
+        public_key_path = directory_path / "public-key.pem"
+        signature_path = directory_path / "signature.bin"
+        der = _ed25519_spki_der(raw_public_key)
+        public_key_path.write_text(
+            "-----BEGIN PUBLIC KEY-----\n"
+            + base64.b64encode(der).decode("ascii")
+            + "\n-----END PUBLIC KEY-----\n",
+            encoding="ascii",
+        )
+        signature_path.write_bytes(signature)
+        try:
+            result = runner.run(
+                [
+                    openssl,
+                    "pkeyutl",
+                    "-verify",
+                    "-pubin",
+                    "-inkey",
+                    str(public_key_path),
+                    "-rawin",
+                    "-in",
+                    str(archive),
+                    "-sigfile",
+                    str(signature_path),
+                ]
+            )
+        except OSError:
+            return False
+    return result.returncode == 0
+
+
+def verify_openssl_capability(runner: CommandRunner, openssl: str) -> None:
+    """Require the selected executable to verify an Ed25519 signature."""
+    try:
+        public_key = base64.b64decode(_OPENSSL_CAPABILITY_PUBLIC_KEY, validate=True)
+        signature = base64.b64decode(_OPENSSL_CAPABILITY_SIGNATURE, validate=True)
+    except (ValueError, base64.binascii.Error) as error:
+        raise PublicationError(FailureClass.TOOLING, "internal OpenSSL capability fixture is invalid") from error
+    with tempfile.TemporaryDirectory(prefix="linkgate-openssl-capability-") as directory:
+        archive = Path(directory) / "probe.bin"
+        archive.write_bytes(_OPENSSL_CAPABILITY_ARTIFACT)
+        if not _run_openssl_ed25519_verification(runner, openssl, archive, signature, public_key):
+            raise PublicationError(FailureClass.TOOLING, "OpenSSL verifier does not support Ed25519 verification")
 
 
 def parse_sign_update_output(output: str, expected_length: int) -> SparkleSignature:
@@ -141,35 +198,14 @@ class SparkleSignatureVerifier:
         sparkle_args.extend(["--verify", str(archive), signature.ed_signature])
         _run_or_raise(self.runner, sparkle_args, "signature verification")
 
-        with tempfile.TemporaryDirectory(prefix="linkgate-sparkle-verify-") as directory:
-            directory_path = Path(directory)
-            public_key_path = directory_path / "public-key.pem"
-            signature_path = directory_path / "signature.bin"
-            der = _ed25519_spki_der(key_bytes)
-            public_key_path.write_text(
-                "-----BEGIN PUBLIC KEY-----\n"
-                + base64.b64encode(der).decode("ascii")
-                + "\n-----END PUBLIC KEY-----\n",
-                encoding="ascii",
-            )
-            signature_path.write_bytes(base64.b64decode(signature.ed_signature, validate=True))
-            _run_or_raise(
-                self.runner,
-                [
-                    self.openssl,
-                    "pkeyutl",
-                    "-verify",
-                    "-pubin",
-                    "-inkey",
-                    str(public_key_path),
-                    "-rawin",
-                    "-in",
-                    str(archive),
-                    "-sigfile",
-                    str(signature_path),
-                ],
-                "configured public-key verification",
-            )
+        if not _run_openssl_ed25519_verification(
+            self.runner,
+            self.openssl,
+            archive,
+            base64.b64decode(signature.ed_signature, validate=True),
+            key_bytes,
+        ):
+            raise PublicationError(FailureClass.TOOLING, "Sparkle configured public-key verification failed")
 
 
 def verify_sign_update(provenance: PublicationConfig, path: str) -> None:

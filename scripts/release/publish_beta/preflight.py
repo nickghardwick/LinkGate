@@ -19,7 +19,7 @@ from .config import PublicationConfig, load_config
 from .errors import FailureClass, PublicationError
 from .models import parse_marketing_version
 from .release_notes import release_notes_source_path, render_release_notes
-from .sparkle import verify_sign_update
+from .sparkle import verify_openssl_capability, verify_sign_update
 from .step6 import Step6Artifacts, Step6Manifest, discover_artifacts, load_manifest, validate_artifacts
 
 
@@ -51,6 +51,8 @@ class PreflightContext:
     artifacts: Step6Artifacts
     release_notes_path: Path
     tag: str
+    sign_update_path: str
+    openssl_path: str
 
 
 @dataclass
@@ -230,8 +232,29 @@ class GitHubReadOnly:
     def tag(self, repository: str, tag: str) -> CommandResult:
         return self.runner.run([self.gh_path, "api", "--method", "GET", f"repos/{repository}/git/ref/tags/{tag}"])
 
+    def tag_object(self, repository: str, sha: str) -> CommandResult:
+        return self.runner.run([self.gh_path, "api", "--method", "GET", f"repos/{repository}/git/tags/{sha}"])
+
     def release(self, repository: str, tag: str) -> CommandResult:
         return self.runner.run([self.gh_path, "release", "view", tag, "--repo", repository, "--json", "tagName,name,isDraft,isPrerelease"])
+
+    def release_details(self, repository: str, tag: str) -> CommandResult:
+        return self.runner.run([
+            self.gh_path,
+            "release",
+            "view",
+            tag,
+            "--repo",
+            repository,
+            "--json",
+            "tagName,name,isDraft,isPrerelease,url,publishedAt,assets",
+        ])
+
+    def ref(self, repository: str, reference: str) -> CommandResult:
+        return self.runner.run([self.gh_path, "api", "--method", "GET", f"repos/{repository}/git/ref/{reference}"])
+
+    def commit(self, repository: str, sha: str) -> CommandResult:
+        return self.runner.run([self.gh_path, "api", "--method", "GET", f"repos/{repository}/commits/{sha}"])
 
 
 def _run_git(deps: PreflightDependencies, repo_root: Path, args: Sequence[str]) -> CommandResult:
@@ -391,6 +414,13 @@ def _check_tools(report: PreflightReport, deps: PreflightDependencies, config: P
                 report.add_pass(PreflightCategory.TOOLING, f"{name} available at {path} ({inspected.version})")
             else:
                 report.add_pass(PreflightCategory.TOOLING, f"{name} available at {path}")
+        elif name == "openssl":
+            try:
+                verify_openssl_capability(deps.runner, path)
+            except PublicationError as error:
+                report.add_blocker(PreflightCategory.TOOLING, str(error))
+            else:
+                report.add_pass(PreflightCategory.TOOLING, f"OpenSSL at {path} supports Ed25519 verification")
     return found
 
 
@@ -549,6 +579,8 @@ def run_preflight(repo_root: Path, config_path: Path, dependencies: PreflightDep
             artifacts=artifacts,
             release_notes_path=release_notes_source_path(repo_root, config, manifest.marketing_version),
             tag=tag,
+            sign_update_path=tools["sign_update"],
+            openssl_path=tools["openssl"],
         )
     return report
 

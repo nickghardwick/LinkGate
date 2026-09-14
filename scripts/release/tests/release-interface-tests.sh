@@ -141,6 +141,10 @@ publish_command='./scripts/release/publish-beta.sh'
 publish_recipe=$(cd "$repo_root" && make -n publish-beta) || fail 'make -n publish-beta failed'
 [ "$(printf '%s\n' "$publish_recipe" | sed '/^[[:space:]]*$/d')" = "$publish_command" ] ||
     fail 'make publish-beta must invoke only the public orchestration wrapper'
+retrospective_command='./scripts/release/verify-published-beta.sh'
+retrospective_recipe=$(cd "$repo_root" && make -n verify-published-beta) || fail 'make -n verify-published-beta failed'
+[ "$(printf '%s\n' "$retrospective_recipe" | sed '/^[[:space:]]*$/d')" = "$retrospective_command" ] ||
+    fail 'make verify-published-beta must invoke only the retrospective verifier wrapper'
 if printf '%s\n' "$verify_recipe" "$release_tests_recipe" "$publish_tests_recipe" | grep -F -- "$publish_command" >/dev/null; then
     fail 'offline verification targets must not invoke live publication'
 fi
@@ -151,6 +155,10 @@ fi
 if grep -E -- 'gh[[:space:]]+release[[:space:]]+publish|generate_appcast|sign_update|gh-pages|git[[:space:]]+push[[:space:]]+(-f|--force|--all|--tags|--mirror)' \
     "$repo_root/scripts/release/publish_beta/mutation.py" >/dev/null; then
     fail 'draft mutation core must not publish, sign, update Pages, or force-push'
+fi
+if grep -E -- '(^|[;&|[:space:]])(git[[:space:]]+(tag|push)|gh[[:space:]]+release[[:space:]])' \
+    "$repo_root/scripts/release/verify-published-beta.sh" "$repo_root/scripts/release/publish_beta/retrospective.py" >/dev/null; then
+    fail 'retrospective verification must not mutate Git or GitHub'
 fi
 if grep -E -- 'git[[:space:]]+push|gh[[:space:]]+release|gh-pages.*push' \
     "$repo_root/scripts/release/publish_beta/pages.py" "$repo_root/scripts/release/publish_beta/staging.py" >/dev/null; then

@@ -20,6 +20,7 @@ from .preflight import (
     DefaultToolLocator,
     HttpClient,
     PreflightDependencies,
+    PreflightContext,
     PreflightReport,
     SubprocessRunner,
     ToolLocator,
@@ -45,6 +46,7 @@ class MutationResult:
     message: str
     publication_record: PublicationRecord | None = None
     ownership: InvocationOwnership | None = None
+    preflight_context: PreflightContext | None = None
 
 
 @dataclass
@@ -563,6 +565,7 @@ def _stage_draft(
         "draft prerelease staged and all four assets verified",
         publication_record,
         ownership,
+        preflight.context,
     )
 
 

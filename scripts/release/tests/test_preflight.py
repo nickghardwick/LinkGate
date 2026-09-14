@@ -224,9 +224,52 @@ class PreflightTests(unittest.TestCase):
             "",
         )
         tools = FakeTools({name: FixtureTool(f"/fake/{name}") for name in (
-            "git", "gh", "python", "xcodebuild", "xcrun", "codesign", "stapler", "spctl", "hdiutil", "sign_update"
+            "git", "gh", "python", "openssl", "xcodebuild", "xcrun", "codesign", "stapler", "spctl", "hdiutil", "sign_update"
         )})
         return PreflightDependencies(runner=runner, tools=tools, http=FakeHTTP(HttpResponse(404, b"")))
+
+    def test_incompatible_openssl_is_blocked_before_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_repo(directory)
+            deps = self.base_dependencies()
+            deps.tools.values["openssl"] = FixtureTool("/usr/bin/openssl", "LibreSSL 3.3.6")
+            class IncompatibleOpenSSLRunner(FakeRunner):
+                def run(self, args, cwd=None):
+                    if args and args[0] == "/usr/bin/openssl" and "pkeyutl" in args:
+                        self.calls.append((tuple(str(arg) for arg in args), cwd))
+                        return CommandResult(1, "", "unsupported algorithm")
+                    return super().run(args, cwd)
+
+            deps.runner = IncompatibleOpenSSLRunner()
+            report = run_preflight(root, self.write_config(root), deps)
+            blockers = "\n".join(f.message for f in report.findings if f.blocking)
+            self.assertIn("OpenSSL", blockers)
+            self.assertIn("Ed25519", blockers)
+
+    def test_compatible_openssl_capability_is_reported_as_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_repo(directory)
+            deps = self.base_dependencies()
+            deps.tools.values["openssl"] = FixtureTool("/opt/homebrew/bin/openssl", "OpenSSL 3.6.3")
+            report = run_preflight(root, self.write_config(root), deps)
+            self.assertTrue(any(
+                finding.category is PreflightCategory.TOOLING
+                and not finding.blocking
+                and "OpenSSL" in finding.message
+                and "Ed25519" in finding.message
+                for finding in report.findings
+            ))
+
+    def test_missing_openssl_is_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_repo(directory)
+            deps = self.base_dependencies()
+            deps.tools.values.pop("openssl")
+            report = run_preflight(root, self.write_config(root), deps)
+            self.assertIn(
+                "required tool is unavailable: openssl",
+                "\n".join(f.message for f in report.findings if f.blocking),
+            )
 
     def test_stale_source_commit_and_missing_notes_block(self):
         with tempfile.TemporaryDirectory() as directory:

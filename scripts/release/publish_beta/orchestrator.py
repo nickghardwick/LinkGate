@@ -31,10 +31,9 @@ from .preflight import (
     PreflightDependencies,
     PreflightReport,
     SubprocessRunner,
-    ToolLocator,
     run_preflight,
 )
-from .sparkle import SignUpdateAdapter, SparkleSignatureVerifier
+from .sparkle import SignUpdateAdapter, SparkleSignature, SparkleSignatureVerifier
 from .staging import stage_staged_draft_content
 from .step6 import discover_artifacts, load_manifest, validate_artifacts
 
@@ -352,14 +351,15 @@ class DefaultPagesSource:
 
 
 class DefaultContentStager:
-    def __init__(self, runner, tools: ToolLocator) -> None:
+    def __init__(self, runner) -> None:
         self.runner = runner
-        self.tools = tools
 
     def stage(self, repo_root: Path, config_path: Path, staged: MutationResult, source: PagesSourceState) -> PagesStageResult:
         config = load_config(config_path)
-        sign_update = self.tools.find("sign_update") or "sign_update"
-        openssl = self.tools.find("openssl") or "openssl"
+        if staged.preflight_context is None:
+            raise PublicationError(FailureClass.TOOLING, "validated publication tool context is missing")
+        sign_update = staged.preflight_context.sign_update_path
+        openssl = staged.preflight_context.openssl_path
         signer = SignUpdateAdapter(self.runner, sign_update, account=config.sparkle_keychain_account)
         verifier = SparkleSignatureVerifier(
             self.runner, sign_update, openssl, account=config.sparkle_keychain_account
@@ -368,6 +368,7 @@ class DefaultContentStager:
         return stage_staged_draft_content(
             repo_root, config_path, staged, signer, verifier, pages_git,
             source.expected_previous_tip, source.existing_appcast, self.runner,
+            sign_update_path=sign_update, openssl_path=openssl,
         )
 
 
@@ -445,10 +446,19 @@ class DefaultPagesPusher:
 
 
 class DefaultPublicVerifier:
-    def __init__(self, config: PublicationConfig, http: HttpClient, sleeper: Callable[[float], None] = sleep) -> None:
+    def __init__(
+        self,
+        config: PublicationConfig,
+        http: HttpClient,
+        sleeper: Callable[[float], None] = sleep,
+        runner=None,
+        signature_verifier=None,
+    ) -> None:
         self.config = config
         self.http = http
         self.sleeper = sleeper
+        self.runner = runner or SubprocessRunner()
+        self.signature_verifier = signature_verifier
 
     def _get(self, url: str, predicate: Callable[[bytes], bool], failure_class: FailureClass, message: str) -> bytes:
         last = ""
@@ -470,19 +480,35 @@ class DefaultPublicVerifier:
         expected_notes = expected_notes_path.read_bytes()
         dmg = next(asset for asset in record.assets if asset.name.endswith(".dmg"))
         dmg_url = github_release_asset_url(self.config, record.marketing_version, dmg.name)
-        self._get(
+        public_dmg = self._get(
             dmg_url,
             lambda body: hashlib.sha256(body).hexdigest() == dmg.sha256,
             FailureClass.TRUST,
             "public GitHub DMG does not match Step 6 bytes",
         )
         expected_feed = parse_appcast(expected_appcast)
-        self._get(
+        public_feed = self._get(
             record.appcast_url,
             lambda body: _same_appcast(body, expected_feed),
             FailureClass.APPCAST,
             "public appcast does not match the staged feed",
         )
+        if stage.sign_update_path is None or stage.openssl_path is None:
+            raise PublicationError(FailureClass.TOOLING, "validated Sparkle verifier tool context is missing")
+        public_item = parse_appcast(public_feed).items[0]
+        with tempfile.TemporaryDirectory(prefix="linkgate-public-dmg-") as directory:
+            public_dmg_path = Path(directory) / dmg.name
+            public_dmg_path.write_bytes(public_dmg)
+            (self.signature_verifier or SparkleSignatureVerifier(
+                self.runner,
+                stage.sign_update_path,
+                stage.openssl_path,
+                account=self.config.sparkle_keychain_account,
+            )).verify(
+                public_dmg_path,
+                SparkleSignature(public_item.ed_signature, public_item.enclosure_length),
+                self.config.sparkle_public_key,
+            )
         notes_url = self.config.release_notes_url(record.marketing_version)
         self._get(
             notes_url,
@@ -568,10 +594,10 @@ def default_dependencies(repo_root: Path, config_path: Path) -> OrchestrationDep
         preflight=lambda root, path: run_preflight(root, path, PreflightDependencies(runner=runner, tools=tools, http=http)),
         draft=DefaultDraftLifecycle(mutation_dependencies, repo_root),
         pages_source=DefaultPagesSource(runner, http),
-        content=DefaultContentStager(runner, tools),
+        content=DefaultContentStager(runner),
         release=release,
         pages_push=DefaultPagesPusher(runner),
-        public=DefaultPublicVerifier(config, http) if config is not None else _UnavailablePublicVerifier(),
+        public=DefaultPublicVerifier(config, http, runner=runner) if config is not None else _UnavailablePublicVerifier(),
         evidence=LocalEvidenceWriter(),
         summary=_print_summary,
     )

@@ -7,7 +7,7 @@ MACOS_DESTINATION := platform=macOS,arch=$(HOST_ARCH)
 
 XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIGURATION) -destination '$(MACOS_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH)
 
-.PHONY: build test verify release-tests publish-beta-tests publish-beta-check publish-beta run release
+.PHONY: build test verify release-tests publish-beta-tests publish-beta-check publish-beta verify-published-beta run release
 
 build:
 	$(XCODEBUILD) build
@@ -44,6 +44,9 @@ publish-beta-check:
 
 publish-beta:
 	./scripts/release/publish-beta.sh
+
+verify-published-beta:
+	./scripts/release/verify-published-beta.sh
 
 release:
 	./scripts/release/release.sh

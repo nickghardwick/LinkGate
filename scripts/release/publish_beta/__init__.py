@@ -7,7 +7,7 @@ from .errors import FailureClass, PublicationError
 from .models import AssetFact, PublicationRecord, ReleaseIdentity, RenderedReleaseNotes
 from .pages import LocalPagesGit, PagesStageResult, stage_pages
 from .release_notes import render_release_notes, release_notes_source_path
-from .sparkle import SignUpdateAdapter, SparkleSignature, SparkleSignatureVerifier, parse_sign_update_output
+from .sparkle import SignUpdateAdapter, SparkleSignature, SparkleSignatureVerifier, parse_sign_update_output, verify_openssl_capability
 from .staging import stage_staged_draft_content
 from .step6 import Step6Artifacts, Step6Manifest, discover_artifacts, load_manifest, validate_artifacts
 
@@ -27,6 +27,7 @@ __all__ = [
     "SignUpdateAdapter",
     "SparkleSignature",
     "SparkleSignatureVerifier",
+    "verify_openssl_capability",
     "Step6Artifacts",
     "Step6Manifest",
     "discover_artifacts",

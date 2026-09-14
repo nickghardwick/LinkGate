@@ -23,6 +23,8 @@ def stage_staged_draft_content(
     expected_previous_pages_tip: str | None,
     existing_appcast: bytes | None,
     runner: CommandRunner | None = None,
+    sign_update_path: str | None = None,
+    openssl_path: str | None = None,
 ) -> PagesStageResult:
     """Prepare signed update content and a local Pages commit for a D7 draft."""
     if staged.state is not MutationState.STAGED_DRAFT_READY or staged.publication_record is None:
@@ -48,6 +50,8 @@ def stage_staged_draft_content(
         pages_git,
         runner or SubprocessRunner(),
         existing_feed=existing_appcast is not None,
+        sign_update_path=sign_update_path,
+        openssl_path=openssl_path,
     )
 
 

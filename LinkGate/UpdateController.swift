@@ -55,7 +55,12 @@ final class UpdateController: NSObject, UpdateChecking, HandlerPreservationResto
         LinkGateLog.updater.debug("Handler restoration requested")
         handlerPreservation.restoreIfNeeded { [weak self] result in
             self?.latestHandlerPreservationResult = result
-            LinkGateLog.updater.info("Handler restoration completed disposition=\(Self.diagnosticDisposition(for: result.disposition), privacy: .public)")
+            let disposition = Self.diagnosticDisposition(for: result.disposition)
+            if Self.isFailedRestoration(result.disposition) {
+                LinkGateLog.updater.error("Handler restoration completed disposition=\(disposition, privacy: .public)")
+            } else {
+                LinkGateLog.updater.info("Handler restoration completed disposition=\(disposition, privacy: .public)")
+            }
         }
     }
 
@@ -77,6 +82,15 @@ final class UpdateController: NSObject, UpdateChecking, HandlerPreservationResto
         case .registrationFailed: "registration-failed"
         case .verificationFailed: "verification-failed"
         case .exhausted: "exhausted"
+        }
+    }
+
+    private static func isFailedRestoration(_ disposition: HandlerPreservationRestorationDisposition) -> Bool {
+        switch disposition {
+        case .registrationFailed, .verificationFailed, .exhausted:
+            true
+        case .noPendingRecord, .gated, .alreadyPreservedOrNotOwned, .restored:
+            false
         }
     }
 }

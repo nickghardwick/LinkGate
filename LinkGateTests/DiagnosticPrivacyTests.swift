@@ -62,52 +62,95 @@ final class DiagnosticPrivacyTests: XCTestCase {
         }
     }
 
-    func testBrowserOpenErrorsUseOnlyTheClosedBrowserOpenFailureCategory() {
-        let error = NSError(
-            domain: "com.example.browser.private-domain-token-193",
-            code: 41,
-            userInfo: [
-                NSLocalizedDescriptionKey: "Could not open https://private.example/documents/DOC-BROWSER-771?access_token=browser-token-41 for alice@example.com.",
-                "privatePath": "/Users/alice/Library/Application Support/Browser/session-41",
-            ]
+    func testSanitizedLocationPathReplacesUserHomeWithTildeAndPreservesSystemApplicationsPath() {
+        let developmentCopy = URL(fileURLWithPath: "/Users/alice/Library/Developer/Xcode/DerivedData/LinkGate-abc123/Build/Products/Debug/LinkGate.app")
+        let installedApplication = URL(fileURLWithPath: "/Applications/LinkGate.app")
+
+        let sanitizedDevelopmentPath = DiagnosticLocation.sanitizedPath(for: developmentCopy)
+        let sanitizedInstalledPath = DiagnosticLocation.sanitizedPath(for: installedApplication)
+
+        XCTAssertEqual(
+            sanitizedDevelopmentPath,
+            "~/Library/Developer/Xcode/DerivedData/LinkGate-abc123/Build/Products/Debug/LinkGate.app"
         )
+        assertDoesNotContain(sanitizedDevelopmentPath, anyOf: ["alice", "/Users/alice"])
+        XCTAssertEqual(sanitizedInstalledPath, "/Applications/LinkGate.app")
+    }
 
-        let category = DiagnosticError.category(for: error, operation: .browserOpen)
+    func testBrowserOpenErrorsUseOnlyTheClosedBrowserOpenFailureCategory() {
+        let fixtures: [(error: Error, secrets: [String])] = [
+            (
+                NSError(
+                    domain: "com.example.browser.private-domain-token-193",
+                    code: 41,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Could not open https://private.example/documents/DOC-BROWSER-771?access_token=browser-token-41 for alice@example.com.",
+                        "privatePath": "/Users/alice/Library/Application Support/Browser/session-41",
+                    ]
+                ),
+                [
+                    "private-domain-token-193",
+                    "private.example",
+                    "DOC-BROWSER-771",
+                    "browser-token-41",
+                    "alice@example.com",
+                    "/Users/alice",
+                    "session-41",
+                ]
+            ),
+            (
+                UnsafeLocalizedDescriptionError(
+                    localizedSecret: "browser-localized-token-66",
+                    describedSecret: "browser-described-token-67"
+                ),
+                ["browser-localized-token-66", "browser-described-token-67"]
+            ),
+        ]
 
-        XCTAssertEqual(category, "browser-open-failed")
-        assertDoesNotContain(category, anyOf: [
-            "private-domain-token-193",
-            "private.example",
-            "DOC-BROWSER-771",
-            "browser-token-41",
-            "alice@example.com",
-            "/Users/alice",
-            "session-41",
-        ])
+        for fixture in fixtures {
+            let category = DiagnosticError.category(for: fixture.error, operation: .browserOpen)
+
+            XCTAssertEqual(category, "browser-open-failed")
+            assertDoesNotContain(category, anyOf: fixture.secrets)
+        }
     }
 
     func testDefaultHandlerErrorsUseOnlyTheClosedDefaultHandlerFailureCategory() {
-        let error = NSError(
-            domain: "com.example.default-handler.private-domain-token-284",
-            code: 52,
-            userInfo: [
-                NSLocalizedDescriptionKey: "Could not set default handler for https://private.example/documents/DOC-DEFAULT-882?access_token=default-token-52 for alice@example.com.",
-                "privatePath": "/Users/alice/Library/Application Support/LinkGate/request-52",
-            ]
-        )
+        let fixtures: [(error: Error, secrets: [String])] = [
+            (
+                NSError(
+                    domain: "com.example.default-handler.private-domain-token-284",
+                    code: 52,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Could not set default handler for https://private.example/documents/DOC-DEFAULT-882?access_token=default-token-52 for alice@example.com.",
+                        "privatePath": "/Users/alice/Library/Application Support/LinkGate/request-52",
+                    ]
+                ),
+                [
+                    "private-domain-token-284",
+                    "private.example",
+                    "DOC-DEFAULT-882",
+                    "default-token-52",
+                    "alice@example.com",
+                    "/Users/alice",
+                    "request-52",
+                ]
+            ),
+            (
+                UnsafeLocalizedDescriptionError(
+                    localizedSecret: "default-localized-token-76",
+                    describedSecret: "default-described-token-77"
+                ),
+                ["default-localized-token-76", "default-described-token-77"]
+            ),
+        ]
 
-        let category = DiagnosticError.category(for: error, operation: .defaultHandler)
+        for fixture in fixtures {
+            let category = DiagnosticError.category(for: fixture.error, operation: .defaultHandler)
 
-        XCTAssertEqual(category, "default-handler-failed")
-        assertDoesNotContain(category, anyOf: [
-            "private-domain-token-284",
-            "private.example",
-            "DOC-DEFAULT-882",
-            "default-token-52",
-            "alice@example.com",
-            "/Users/alice",
-            "request-52",
-        ])
+            XCTAssertEqual(category, "default-handler-failed")
+            assertDoesNotContain(category, anyOf: fixture.secrets)
+        }
     }
 
     private func assertDoesNotContain(
@@ -124,5 +167,18 @@ final class DiagnosticPrivacyTests: XCTestCase {
                 line: line
             )
         }
+    }
+}
+
+private struct UnsafeLocalizedDescriptionError: LocalizedError, CustomStringConvertible {
+    let localizedSecret: String
+    let describedSecret: String
+
+    var errorDescription: String? {
+        "Unsafe LocalizedError description containing \(localizedSecret)."
+    }
+
+    var description: String {
+        "Unsafe CustomStringConvertible description containing \(describedSecret)."
     }
 }

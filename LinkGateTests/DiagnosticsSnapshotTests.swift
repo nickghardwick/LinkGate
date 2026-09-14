@@ -76,21 +76,40 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         ])
     }
 
+    func testSnapshotRendersSameBundleIdentifierAtDifferentLocationWithoutRenderingItsPath() {
+        let wrongCopyURL = URL(fileURLWithPath: "/Users/alice/Library/Developer/Xcode/DerivedData/LinkGate-secret/Build/Products/Debug/LinkGate.app")
+        let text = makeController(
+            defaultBrowserStatus: DefaultBrowserDiagnosticStatus(
+                http: .sameBundleIdentifierAtDifferentLocation(.developmentCopy),
+                https: .unresolved
+            )
+        ).snapshot().renderedText
+
+        XCTAssertTrue(text.contains("- HTTP: LinkGate at Development copy"))
+        XCTAssertTrue(text.contains("- HTTPS: unresolved"))
+        assertDoesNotContain(text, anyOf: [
+            wrongCopyURL.path,
+            "alice",
+            "LinkGate-secret",
+            "/Users/alice",
+        ])
+    }
+
     func testSnapshotOrdersCurrentEligibleBrowsersFiltersDisabledCandidatesAndDoesNotPersist() throws {
-        let installedCopy = makeCandidate(
+        let firstInstalledCopy = makeCandidate(
             path: "/Applications/Browser A.app",
             displayName: "Alice's Personal Browser",
             bundleIdentifier: "org.example.shared"
         )
-        let developmentCopy = makeCandidate(
-            path: "/Users/alice/Library/Developer/Browser B.app",
+        let secondInstalledCopy = makeCandidate(
+            path: "/Applications/Browser B.app",
             displayName: "Browser B - private token",
             bundleIdentifier: "org.example.shared"
         )
-        let disabledCandidate = makeCandidate(
-            path: "/Applications/Hidden Browser.app",
-            displayName: "Hidden Browser",
-            bundleIdentifier: "org.example.hidden"
+        let disabledDevelopmentCopy = makeCandidate(
+            path: "/Users/alice/Library/Developer/Browser B.app",
+            displayName: "Disabled development copy",
+            bundleIdentifier: "org.example.shared"
         )
         let firstEnabled = makeCandidate(
             path: "/Applications/Zulu Browser.app",
@@ -100,19 +119,19 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         let store = makeStore()
         try store.saveBrowserOrder([
             "bundle:org.example.zulu",
-            "path:\(developmentCopy.applicationURL.path)",
-            "path:\(installedCopy.applicationURL.path)",
-            "bundle:org.example.hidden",
+            "path:\(disabledDevelopmentCopy.applicationURL.path)",
+            "path:\(secondInstalledCopy.applicationURL.path)",
+            "path:\(firstInstalledCopy.applicationURL.path)",
         ])
         try store.saveDisabledBrowserIdentifiers([
-            "bundle:org.example.hidden",
+            "path:\(disabledDevelopmentCopy.applicationURL.path)",
             "bundle:org.example.stale-disabled",
         ])
         let beforeData = try XCTUnwrap(defaults.data(forKey: storageKey))
         let beforeOrder = store.browserOrder
         let beforeDisabled = store.disabledBrowserIdentifiers
         let discovery = FixedBrowserDiscovery(
-            candidates: [installedCopy, developmentCopy, disabledCandidate, firstEnabled]
+            candidates: [firstInstalledCopy, secondInstalledCopy, disabledDevelopmentCopy, firstEnabled]
         )
         let controller = makeController(store: store, browserDiscovery: discovery)
 
@@ -132,8 +151,8 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             Browsers
             - Enabled (3):
               - org.example.zulu
-              - org.example.shared (Development copy)
-              - org.example.shared (Applications)
+              - org.example.shared (Applications #1)
+              - org.example.shared (Applications #2)
             - Disabled detected: 1
             Routing
             - Rules: 0
@@ -151,9 +170,9 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         XCTAssertEqual(store.disabledBrowserIdentifiers, beforeDisabled)
         XCTAssertEqual(discovery.requestedURLs, [URL(string: "https://example.com")!])
         assertDoesNotContain(text, anyOf: [
-            installedCopy.applicationURL.path,
-            developmentCopy.applicationURL.path,
-            disabledCandidate.applicationURL.path,
+            firstInstalledCopy.applicationURL.path,
+            secondInstalledCopy.applicationURL.path,
+            disabledDevelopmentCopy.applicationURL.path,
             "Alice's Personal Browser",
             "private token",
             "bundle:org.example",
@@ -208,6 +227,9 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             firstRule.id.uuidString,
             secondRule.id.uuidString,
             "rule-secret",
+            "urlPrefix",
+            "domainFamily",
+            "exactDomain",
             "automatic install",
             "appcast",
             "signature",
@@ -242,12 +264,28 @@ final class DiagnosticsSnapshotTests: XCTestCase {
                 )
             )
         ).snapshot().renderedText
+        let gated = makeController(
+            updateState: UpdateDiagnosticState(
+                automaticallyChecksForUpdates: true,
+                automaticallyDownloadsUpdates: false,
+                canCheckForUpdates: true,
+                sessionInProgress: false,
+                latestHandlerPreservationResult: .init(
+                    disposition: .gated,
+                    http: .notAttempted,
+                    https: .notAttempted
+                )
+            )
+        ).snapshot().renderedText
 
         XCTAssertTrue(noPending.contains("- Result: none this launch"))
         XCTAssertFalse(noPending.contains("not attempted"))
         XCTAssertTrue(terminal.contains("- Result: registration failed"))
         XCTAssertTrue(terminal.contains("- HTTP: restored"))
         XCTAssertTrue(terminal.contains("- HTTPS: registration failed"))
+        XCTAssertTrue(gated.contains("- Result: gated"))
+        XCTAssertTrue(gated.contains("- HTTP: not attempted"))
+        XCTAssertTrue(gated.contains("- HTTPS: not attempted"))
     }
 
     private func makeController(

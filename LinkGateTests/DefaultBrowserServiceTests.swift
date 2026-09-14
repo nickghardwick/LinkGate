@@ -170,13 +170,14 @@ final class DefaultBrowserServiceTests: XCTestCase {
             )
         )
 
-        workspace.applicationsToOpen = ["http": otherURL, "https": linkGateURL]
+        let unidentifiedOtherURL = URL(fileURLWithPath: "/Volumes/private/Unidentified Browser.app")
+        workspace.applicationsToOpen = ["http": otherURL, "https": unidentifiedOtherURL]
         workspace.bundleIdentifiers = [otherURL: "org.example.other-browser"]
 
         XCTAssertEqual(
             service.diagnosticStatus(),
             DefaultBrowserDiagnosticStatus(http: .otherApplication(bundleIdentifier: "org.example.other-browser"), https: .unresolved),
-            "A resolved handler without a bundle identifier is not another application's identity."
+            "A noncurrent resolved handler without a bundle identifier is not another application's identity."
         )
     }
 

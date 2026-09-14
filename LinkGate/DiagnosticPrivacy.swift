@@ -39,6 +39,10 @@ enum DiagnosticLocation {
     static func sanitizedPath(for applicationURL: URL) -> String {
         let path = applicationURL.standardizedFileURL.path
 
+        if path == "/Applications" || path.hasPrefix("/Applications/") {
+            return path
+        }
+
         if path == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path {
             return "~"
         }
@@ -53,7 +57,7 @@ enum DiagnosticLocation {
             return "~/" + components.dropFirst(2).joined(separator: "/")
         }
 
-        return path
+        return Classification.other.rawValue
     }
 }
 

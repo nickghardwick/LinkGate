@@ -1,4 +1,5 @@
 import Sparkle
+import OSLog
 
 @MainActor
 protocol UpdateChecking: AnyObject {
@@ -46,19 +47,36 @@ final class UpdateController: NSObject, UpdateChecking, HandlerPreservationResto
     }
 
     func checkForUpdates() {
+        LinkGateLog.updater.info("Manual update check requested")
         updater.checkForUpdates(nil)
     }
 
     func restorePreservedHandlersIfNeeded() {
+        LinkGateLog.updater.debug("Handler restoration requested")
         handlerPreservation.restoreIfNeeded { [weak self] result in
             self?.latestHandlerPreservationResult = result
+            LinkGateLog.updater.info("Handler restoration completed disposition=\(Self.diagnosticDisposition(for: result.disposition), privacy: .public)")
         }
     }
 
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        LinkGateLog.updater.info("Update installation announced targetVersion=\(item.displayVersionString, privacy: .public) targetBuild=\(item.versionString, privacy: .public)")
+        LinkGateLog.updater.debug("Handler snapshot requested")
         handlerPreservation.snapshotBeforeInstallation(
             targetVersion: item.displayVersionString,
             targetBuild: item.versionString
         )
+    }
+
+    private static func diagnosticDisposition(for disposition: HandlerPreservationRestorationDisposition) -> String {
+        switch disposition {
+        case .noPendingRecord: "no-pending-record"
+        case .gated: "gated"
+        case .alreadyPreservedOrNotOwned: "already-preserved-or-not-owned"
+        case .restored: "restored"
+        case .registrationFailed: "registration-failed"
+        case .verificationFailed: "verification-failed"
+        case .exhausted: "exhausted"
+        }
     }
 }

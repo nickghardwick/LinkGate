@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 
 @MainActor
 final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
@@ -60,6 +61,7 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
     func receiveIncomingURL(_ url: URL) {
         guard activeURL == nil else {
             pendingURLs.append(url)
+            LinkGateLog.routing.debug("Queued incoming link pendingCount=\(self.pendingURLs.count, privacy: .public)")
             return
         }
 
@@ -108,12 +110,14 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
         let discoveredCandidates = discoveryService.candidates(for: url)
         if discoveredCandidates.isEmpty {
             state = .noCandidates(url)
+            LinkGateLog.browser.notice("No eligible browser candidates available")
             return
         }
 
         let candidates = orderedCandidates(discoveredCandidates)
         if candidates.isEmpty {
             state = .noCandidates(url)
+            LinkGateLog.browser.notice("No visible browser candidates available")
             return
         }
         if let rule = routingEvaluator.matchingRule(for: url, rules: ruleProvider.rules),
@@ -121,6 +125,7 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
                     bundleIdentifier: rule.browserBundleIdentifier,
                     among: discoveredCandidates
                   ), candidates.contains(where: { $0.applicationURL == candidate.applicationURL }) {
+            LinkGateLog.routing.info("Direct route selected browserBundleID=\(candidate.bundleIdentifier ?? "unknown", privacy: .public)")
             submitOpening(
                 SelectionContext(
                     url: url,
@@ -133,6 +138,7 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
                 directly: true
             )
         } else {
+            LinkGateLog.routing.info("Browser chooser required")
             state = .choosing(
                 SelectionContext(
                     url: url,
@@ -174,11 +180,14 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
         activeOpeningRequestID = nil
         switch result {
         case .success:
+            LinkGateLog.browser.info("Browser open succeeded source=\(wasDirect ? "direct" : "chooser", privacy: .public) browserBundleID=\(self.applicationBundleIdentifier(for: applicationURL, in: context.candidates), privacy: .public)")
             finishActiveURL()
-        case .failure:
+        case let .failure(error):
+            LinkGateLog.browser.error("Browser open failed source=\(wasDirect ? "direct" : "chooser", privacy: .public) browserBundleID=\(self.applicationBundleIdentifier(for: applicationURL, in: context.candidates), privacy: .public) category=\(DiagnosticError.category(for: error, operation: .browserOpen), privacy: .public)")
             let refreshedCandidates = orderedCandidates(discoveryService.candidates(for: context.url))
             if refreshedCandidates.isEmpty {
                 state = .noCandidates(context.url)
+                LinkGateLog.browser.notice("No browser candidates available after open failure")
             } else {
                 state = .choosing(
                     SelectionContext(
@@ -195,6 +204,7 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
 
     private func submitOpening(_ context: SelectionContext, candidate: ApplicationCandidate, directly: Bool) {
         state = directly ? .openingDirectly(context) : .choosing(context)
+        LinkGateLog.browser.info("Browser open started source=\(directly ? "direct" : "chooser", privacy: .public) browserBundleID=\(candidate.bundleIdentifier ?? "unknown", privacy: .public)")
         let requestID = UUID()
         activeOpeningRequestID = requestID
         openingService.open(context.url, withApplicationAt: candidate.applicationURL) { [weak self] result in
@@ -216,6 +226,10 @@ final class SelectionCoordinator: ObservableObject, IncomingURLReceiving {
         }
 
         begin(pendingURLs.removeFirst())
+    }
+
+    private func applicationBundleIdentifier(for applicationURL: URL, in candidates: [ApplicationCandidate]) -> String {
+        candidates.first(where: { $0.applicationURL == applicationURL })?.bundleIdentifier ?? "unknown"
     }
 
     private func orderedCandidates(_ candidates: [ApplicationCandidate]) -> [ApplicationCandidate] {

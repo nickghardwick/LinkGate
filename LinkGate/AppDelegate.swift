@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -85,6 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let location = DiagnosticLocation.description(for: Bundle.main.bundleURL)
+        LinkGateLog.app.info("Launched version=\(version, privacy: .public) build=\(build, privacy: .public) location=\(location, privacy: .public)")
+
         handlerPreservationRestoring?.restorePreservedHandlersIfNeeded()
 
         statusItemController = StatusItemController(
@@ -96,7 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            incomingURLHandler.handleIncomingURL(url)
+            if incomingURLHandler.handleIncomingURL(url) {
+                LinkGateLog.app.info("Accepted incoming link scheme=\(DiagnosticURL.scheme(of: url), privacy: .public)")
+            }
         }
     }
 

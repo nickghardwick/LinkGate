@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct HandlerPreservationRecord: Codable, Equatable {
     let sourceVersion: String
@@ -198,6 +199,7 @@ final class HandlerPreservationController: HandlerPreservationManaging {
     }
 
     func snapshotBeforeInstallation(targetVersion: String, targetBuild: String) {
+        LinkGateLog.updater.debug("Capturing handler preservation snapshot targetVersion=\(targetVersion, privacy: .public) targetBuild=\(targetBuild, privacy: .public)")
         recordStore.save(
             HandlerPreservationRecord(
                 sourceVersion: currentVersion,
@@ -214,11 +216,15 @@ final class HandlerPreservationController: HandlerPreservationManaging {
 
     func restoreIfNeeded(completion: @escaping (HandlerPreservationRestorationSummary) -> Void) {
         guard restorationOperation == nil else {
+            LinkGateLog.updater.notice("Handler restoration gated reason=operation-in-progress")
+            LinkGateLog.updater.info("Handler restoration completed disposition=gated")
             completion(.init(disposition: .gated, http: .notAttempted, https: .notAttempted))
             return
         }
 
         guard let record = recordStore.load() else {
+            LinkGateLog.updater.debug("Handler restoration has no pending record")
+            LinkGateLog.updater.info("Handler restoration completed disposition=no-pending-record")
             completion(.init(disposition: .noPendingRecord, http: .notAttempted, https: .notAttempted))
             return
         }
@@ -229,6 +235,8 @@ final class HandlerPreservationController: HandlerPreservationManaging {
         guard bundleIdentifier == Self.linkGateBundleIdentifier,
               ApplicationBundleIdentity.refersToSameApplication(record.applicationURL, applicationURL)
         else {
+            LinkGateLog.updater.notice("Handler restoration gated reason=identity-or-location-mismatch")
+            LinkGateLog.updater.info("Handler restoration completed disposition=gated")
             completion(.init(disposition: .gated, http: .notAttempted, https: .notAttempted))
             return
         }
@@ -239,18 +247,24 @@ final class HandlerPreservationController: HandlerPreservationManaging {
             if record.sourceVersion != currentVersion || record.sourceBuild != currentBuild {
                 recordStore.remove()
             }
+            LinkGateLog.updater.notice("Handler restoration gated reason=version-or-build-mismatch")
+            LinkGateLog.updater.info("Handler restoration completed disposition=gated")
             completion(.init(disposition: .gated, http: .notAttempted, https: .notAttempted))
             return
         }
 
         guard (0...HandlerPreservationRestorationOperation.maximumAttempts).contains(record.attemptCount) else {
             recordStore.remove()
+            LinkGateLog.updater.notice("Handler restoration gated reason=invalid-attempt-count")
+            LinkGateLog.updater.info("Handler restoration completed disposition=gated")
             completion(.init(disposition: .gated, http: .notAttempted, https: .notAttempted))
             return
         }
 
         guard record.attemptCount < HandlerPreservationRestorationOperation.maximumAttempts else {
             recordStore.remove()
+            LinkGateLog.updater.notice("Handler restoration exhausted before scheduling")
+            LinkGateLog.updater.error("Handler restoration completed disposition=exhausted")
             completion(Self.exhaustedSummary(for: record))
             return
         }
@@ -358,12 +372,14 @@ private final class HandlerPreservationRestorationOperation {
             attemptCount: record.attemptCount + 1
         )
         recordStore.save(record)
+        LinkGateLog.updater.debug("Handler restoration attempt=\(self.record.attemptCount, privacy: .public)")
         schemesToRestore = []
         nextSchemeIndex = 0
 
         for scheme in ["http", "https"] {
             guard owns(scheme) else {
                 results[scheme] = .notOwnedBeforeUpdate
+                LinkGateLog.updater.debug("Handler restoration scheme=\(scheme, privacy: .public) result=not-owned-before-update")
                 continue
             }
             if isCurrentApplicationDefault(scheme) {
@@ -371,6 +387,7 @@ private final class HandlerPreservationRestorationOperation {
                     results[scheme] = .alreadyOwnedByCurrentApplication
                 }
                 verifiedSchemes.insert(scheme)
+                LinkGateLog.updater.debug("Handler restoration scheme=\(scheme, privacy: .public) result=already-correct")
             } else {
                 verifiedSchemes.remove(scheme)
                 schemesToRestore.append(scheme)
@@ -390,11 +407,14 @@ private final class HandlerPreservationRestorationOperation {
             guard let self else { return }
             if error != nil {
                 self.results[scheme] = .registrationFailed
+                LinkGateLog.updater.error("Handler restoration scheme=\(scheme, privacy: .public) result=registration-failed")
             } else if self.isCurrentApplicationDefault(scheme) {
                 self.results[scheme] = .restored
                 self.verifiedSchemes.insert(scheme)
+                LinkGateLog.updater.info("Handler restoration scheme=\(scheme, privacy: .public) result=restored")
             } else {
                 self.results[scheme] = .verificationFailed
+                LinkGateLog.updater.error("Handler restoration scheme=\(scheme, privacy: .public) result=verification-failed")
             }
             self.restoreNextScheme()
         }
@@ -419,6 +439,7 @@ private final class HandlerPreservationRestorationOperation {
             disposition = .alreadyPreservedOrNotOwned
         }
         completion(.init(disposition: disposition, http: http, https: https))
+        LinkGateLog.updater.info("Handler restoration completed disposition=\(self.diagnosticDisposition(disposition), privacy: .public)")
     }
 
     private func finishExhausted() {
@@ -426,6 +447,7 @@ private final class HandlerPreservationRestorationOperation {
         let http = resultForExhaustion(scheme: "http")
         let https = resultForExhaustion(scheme: "https")
         completion(.init(disposition: .exhausted, http: http, https: https))
+        LinkGateLog.updater.error("Handler restoration completed disposition=exhausted")
     }
 
     private func owns(_ scheme: String) -> Bool {
@@ -443,5 +465,17 @@ private final class HandlerPreservationRestorationOperation {
     private func resultForExhaustion(scheme: String) -> HandlerPreservationSchemeResult {
         guard owns(scheme) else { return .notOwnedBeforeUpdate }
         return results[scheme] ?? .verificationFailed
+    }
+
+    private func diagnosticDisposition(_ disposition: HandlerPreservationRestorationDisposition) -> String {
+        switch disposition {
+        case .noPendingRecord: "no-pending-record"
+        case .gated: "gated"
+        case .alreadyPreservedOrNotOwned: "already-preserved-or-not-owned"
+        case .restored: "restored"
+        case .registrationFailed: "registration-failed"
+        case .verificationFailed: "verification-failed"
+        case .exhausted: "exhausted"
+        }
     }
 }

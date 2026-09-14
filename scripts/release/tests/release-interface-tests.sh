@@ -119,6 +119,7 @@ for release_test in \
     release-preflight-tests.sh \
     release-workflow-tests.sh \
     release-interface-tests.sh \
+    publish-env-tests.sh \
     sparkle-integration-tests.sh; do
     test_command="./scripts/release/tests/$release_test"
     printf '%s\n' "$verify_recipe" | grep -F -- "$test_command" >/dev/null ||

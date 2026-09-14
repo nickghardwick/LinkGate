@@ -41,7 +41,9 @@ run` builds and opens the Debug app for local testing.
 and deterministic release checks; it is the authoritative verification path.
 
 The repository also contains the beta publication pipeline. Set it up with
-`./scripts/release/setup-publish-env.sh`, then run `make publish-beta-tests`.
+`./scripts/release/setup-publish-env.sh`, then source
+`./scripts/release/activate-publish-env.sh` before running publication commands.
+Run `make publish-beta-tests` to exercise the offline publication suite.
 See [`RELEASING.md`](RELEASING.md) for the public release-tooling setup and
 publication sequence. `make publish-beta-check` is the read-only readiness
 check, while `make publish-beta` is the explicit public publication command.

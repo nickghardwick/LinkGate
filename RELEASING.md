@@ -12,12 +12,18 @@ Python environment explicitly:
 
 ```bash
 ./scripts/release/setup-publish-env.sh
+. ./scripts/release/activate-publish-env.sh
 make publish-beta-tests
 ```
 
 The environment installs the exact dependency pin in
-`requirements-publish.txt`. The virtual environment is `.venv/publish/` and
-is ignored. Normal verification never installs or updates packages.
+`requirements-publish.txt` and provisions the pinned Sparkle 2.9.6
+`sign_update` binary. The virtual environment is `.venv/publish/`; the Sparkle
+tool is `.venv/publish-tools/sparkle-2.9.6/`; both are ignored. Setup verifies
+the official archive SHA-256 before extracting it, then verifies the extracted
+tool SHA-256. Activation verifies the installed tool again, exports
+`LINKGATE_SPARKLE_DIR`, and prepends the verified Sparkle and Python bins to
+`PATH`. Normal verification never installs, updates, or downloads packages.
 
 Publication constants are kept in
 `scripts/release/publish-config.json`. The canonical repository and production
@@ -73,11 +79,12 @@ Sparkle 2.9.6 `sign_update` does not provide a release-version interface:
 `--version` exits with a usage error, while `-h` and `--help` print options but
 no version. The committed publication configuration therefore pins the
 official `Sparkle-2.9.6.tar.xz` release URL and digest, the expected
-`bin/sign_update` path, and the extracted binary digest. After obtaining and
-extracting that official archive locally, set:
+`bin/sign_update` path, and the extracted binary digest. Provision and expose
+that exact local tool with:
 
 ```bash
-export LINKGATE_SPARKLE_DIR=/path/to/extracted/Sparkle-2.9.6
+./scripts/release/setup-publish-env.sh
+. ./scripts/release/activate-publish-env.sh
 ```
 
 `make publish-beta-check` hashes `$LINKGATE_SPARKLE_DIR/bin/sign_update` and

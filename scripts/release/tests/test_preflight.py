@@ -1,7 +1,9 @@
 import hashlib
 import json
+import os
 import tempfile
 import unittest
+from unittest import mock
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +13,7 @@ from scripts.release.publish_beta.errors import FailureClass, PublicationError
 from scripts.release.publish_beta.preflight import (
     CommandResult,
     HttpResponse,
+    DefaultToolLocator,
     PreflightDependencies,
     PreflightCategory,
     ToolResult,
@@ -361,6 +364,22 @@ class PreflightTests(unittest.TestCase):
             with self.assertRaises(PublicationError) as raised:
                 verify_sign_update(config, str(tool))
             self.assertIn("does not match the pinned", str(raised.exception))
+
+    def test_default_tool_locator_rejects_arbitrary_path_sign_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            arbitrary = Path(directory) / "bin"
+            arbitrary.mkdir()
+            tool = arbitrary / "sign_update"
+            tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            tool.chmod(0o755)
+
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": str(arbitrary)},
+                clear=False,
+            ):
+                os.environ.pop("LINKGATE_SPARKLE_DIR", None)
+                self.assertIsNone(DefaultToolLocator(FakeRunner()).find("sign_update"))
 
     def test_sparkle_provenance_does_not_probe_an_unstable_version_flag(self):
         with tempfile.TemporaryDirectory() as directory:

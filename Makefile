@@ -26,6 +26,7 @@ verify:
 	./scripts/release/tests/release-preflight-tests.sh || status=$$?; \
 	./scripts/release/tests/release-workflow-tests.sh || status=$$?; \
 	./scripts/release/tests/release-interface-tests.sh || status=$$?; \
+	./scripts/release/tests/publish-env-tests.sh || status=$$?; \
 	./scripts/release/tests/sparkle-integration-tests.sh || status=$$?; \
 	./scripts/release/tests/publish-beta-tests.sh || status=$$?; \
 	exit $$status
@@ -35,6 +36,7 @@ release-tests:
 	./scripts/release/tests/release-preflight-tests.sh
 	./scripts/release/tests/release-workflow-tests.sh
 	./scripts/release/tests/release-interface-tests.sh
+	./scripts/release/tests/publish-env-tests.sh
 	./scripts/release/tests/sparkle-integration-tests.sh
 	./scripts/release/tests/publish-beta-tests.sh
 

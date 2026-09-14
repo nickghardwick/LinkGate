@@ -351,6 +351,6 @@ private final class FixedBrowserDiscovery: BrowserDiscoveryService {
 
     func candidates(for url: URL) -> [ApplicationCandidate] {
         requestedURLs.append(url)
-        candidatesToReturn
+        return candidatesToReturn
     }
 }

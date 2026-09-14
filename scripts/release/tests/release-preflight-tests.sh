@@ -485,6 +485,54 @@ cat >"$valid_metadata" <<'JSON'
 }
 JSON
 
+configure_approved_sparkle_info() {
+    local plist=$1/Contents/Info.plist
+
+    plutil -insert SUFeedURL -string 'https://nickghardwick.github.io/LinkGate/updates/appcast.xml' "$plist"
+    plutil -insert SUPublicEDKey -string 'En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU=' "$plist"
+}
+
+install_expected_sparkle_runtime() {
+    local bundle=$1
+    local framework=$bundle/Contents/Frameworks/Sparkle.framework/Versions/B
+    local framework_root=$bundle/Contents/Frameworks/Sparkle.framework
+    local framework_info=$framework/Resources/Info.plist
+    local code_signature
+    local executable
+
+    # These paths are the observed Xcode Release layout for Sparkle 2.9.6.
+    for code_signature in \
+        Contents/_CodeSignature \
+        Contents/Frameworks/Sparkle.framework/Versions/B/_CodeSignature \
+        Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/_CodeSignature \
+        Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/_CodeSignature \
+        Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/_CodeSignature; do
+        mkdir -p "$bundle/$code_signature"
+    done
+
+    mkdir -p "$(dirname -- "$framework_info")"
+    plutil -create xml1 "$framework_info"
+    plutil -insert CFBundleShortVersionString -string 2.9.6 "$framework_info"
+
+    for executable in \
+        Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle \
+        Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate \
+        Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater \
+        Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader \
+        Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer; do
+        mkdir -p "$(dirname -- "$bundle/$executable")"
+        : >"$bundle/$executable"
+        chmod +x "$bundle/$executable"
+    done
+
+    ln -s B "$framework_root/Versions/Current"
+    ln -s Versions/Current/Updater.app "$framework_root/Updater.app"
+    mkdir -p "$bundle/Contents/Resources"
+    : >"$bundle/Contents/PkgInfo"
+    : >"$bundle/Contents/Resources/AppIcon.icns"
+    : >"$bundle/Contents/Resources/Assets.car"
+}
+
 new_app_case() {
     local name=$1
 
@@ -496,6 +544,8 @@ new_app_case() {
     mkdir -p "$app_case"
     cp -R "$fixtures/app/LinkGate.app" "$app"
     chmod +x "$app/Contents/MacOS/LinkGate"
+    configure_approved_sparkle_info "$app"
+    install_expected_sparkle_runtime "$app"
     write_stubs "$stub_bin"
 }
 
@@ -530,6 +580,52 @@ assert_contains "$stub_log" 'codesign --display --verbose=4'
 assert_not_contains "$stub_log" 'spctl --assess --type execute --verbose=4'
 assert_json_value "$observed" '.notarized' 'false'
 assert_json_value "$observed" '.stapled' 'false'
+
+new_app_case wrong-sparkle-feed
+plutil -replace SUFeedURL -string 'https://example.invalid/updates/appcast.xml' "$app/Contents/Info.plist"
+assert_validation_failure wrong-sparkle-feed "$app" "$valid_metadata" "$observed"
+
+new_app_case wrong-sparkle-public-key
+plutil -replace SUPublicEDKey -string 'invalid-public-key' "$app/Contents/Info.plist"
+assert_validation_failure wrong-sparkle-public-key "$app" "$valid_metadata" "$observed"
+
+new_app_case private-sparkle-key
+plutil -insert SUPrivateEDKey -string 'private-test-key-material' "$app/Contents/Info.plist"
+assert_validation_failure private-sparkle-key "$app" "$valid_metadata" "$observed"
+
+new_app_case neutral-name-private-material
+: >"$app/Contents/Resources/ed25519"
+assert_validation_failure neutral-name-private-material "$app" "$valid_metadata" "$observed"
+
+new_app_case unexpected-direct-contents-entry
+: >"$app/Contents/neutral"
+assert_validation_failure unexpected-direct-contents-entry "$app" "$valid_metadata" "$observed"
+
+new_app_case missing-sparkle-executable
+rm "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer"
+assert_validation_failure missing-sparkle-executable "$app" "$valid_metadata" "$observed"
+
+new_app_case wrong-sparkle-runtime-version
+plutil -replace CFBundleShortVersionString -string 2.9.5 "$app/Contents/Frameworks/Sparkle.framework/Versions/B/Resources/Info.plist"
+assert_validation_failure wrong-sparkle-runtime-version "$app" "$valid_metadata" "$observed"
+
+new_app_case unexpected-signed-framework
+mkdir -p "$app/Contents/Frameworks/Foreign.framework/Versions/A/_CodeSignature"
+assert_validation_failure unexpected-signed-framework "$app" "$valid_metadata" "$observed"
+
+new_app_case unexpected-signed-xpc-service
+mkdir -p "$app/Contents/XPCServices/Foreign.xpc/Contents/_CodeSignature"
+assert_validation_failure unexpected-signed-xpc-service "$app" "$valid_metadata" "$observed"
+
+new_app_case unexpected-signed-application
+mkdir -p "$app/Contents/Frameworks/Foreign.app/Contents/_CodeSignature"
+assert_validation_failure unexpected-signed-application "$app" "$valid_metadata" "$observed"
+
+new_app_case unexpected-embedded-library
+mkdir -p "$app/Contents/Frameworks"
+: >"$app/Contents/Frameworks/Foreign.dylib"
+chmod +x "$app/Contents/Frameworks/Foreign.dylib"
+assert_validation_failure unexpected-embedded-library "$app" "$valid_metadata" "$observed"
 
 new_app_case pre-notarization-gatekeeper-rejected
 run_validate_app "$app" "$valid_metadata" "$observed" SPCTL_OK=0

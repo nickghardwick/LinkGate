@@ -8,6 +8,7 @@ set -euo pipefail
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd -P)
 info_plist="$repo_root/LinkGate/Info.plist"
+app_delegate="$repo_root/LinkGate/AppDelegate.swift"
 project="$repo_root/LinkGate.xcodeproj/project.pbxproj"
 resolution="$repo_root/LinkGate.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 
@@ -17,6 +18,7 @@ fail() {
 }
 
 [ -f "$info_plist" ] || fail 'missing application Info.plist'
+[ -f "$app_delegate" ] || fail 'missing AppDelegate source'
 [ -f "$project" ] || fail 'missing Xcode project'
 [ -f "$resolution" ] || fail 'missing committed Swift package resolution'
 
@@ -44,6 +46,118 @@ done
 if grep -E -i '<key>[^<]*private[^<]*key[^<]*</key>' "$info_plist" >/dev/null; then
     fail 'application Info.plist must not contain private-key configuration'
 fi
+
+xcrun swift - "$app_delegate" <<'SWIFT' || fail 'AppDelegate must construct exactly one UpdateController outside applicationDidFinishLaunching'
+import Foundation
+
+enum LexerState {
+    case normal
+    case lineComment
+    case blockComment(Int)
+    case string
+}
+
+func sourceWithoutCommentsAndStrings(_ source: String) -> String {
+    let characters = Array(source)
+    var output = ""
+    var state: LexerState = .normal
+    var index = 0
+
+    while index < characters.count {
+        let character = characters[index]
+        let next = index + 1 < characters.count ? characters[index + 1] : nil
+
+        switch state {
+        case .normal:
+            if character == "/", next == "/" {
+                output += "  "
+                index += 2
+                state = .lineComment
+            } else if character == "/", next == "*" {
+                output += "  "
+                index += 2
+                state = .blockComment(1)
+            } else if character == "\"" {
+                output += " "
+                index += 1
+                state = .string
+            } else {
+                output.append(character)
+                index += 1
+            }
+        case .lineComment:
+            output.append(character == "\n" ? "\n" : " ")
+            index += 1
+            if character == "\n" {
+                state = .normal
+            }
+        case let .blockComment(depth):
+            if character == "/", next == "*" {
+                output += "  "
+                index += 2
+                state = .blockComment(depth + 1)
+            } else if character == "*", next == "/" {
+                output += "  "
+                index += 2
+                state = depth == 1 ? .normal : .blockComment(depth - 1)
+            } else {
+                output.append(character == "\n" ? "\n" : " ")
+                index += 1
+            }
+        case .string:
+            if character == "\\", next != nil {
+                output += "  "
+                index += 2
+            } else {
+                output.append(character == "\n" ? "\n" : " ")
+                index += 1
+                if character == "\"" {
+                    state = .normal
+                }
+            }
+        }
+    }
+
+    return output
+}
+
+func constructorCount(in source: String) -> Int {
+    let expression = try! NSRegularExpression(pattern: #"\bUpdateController\s*\(\s*\)"#)
+    return expression.numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
+}
+
+let path = CommandLine.arguments[1]
+let source = try String(contentsOfFile: path, encoding: .utf8)
+let sanitized = sourceWithoutCommentsAndStrings(source)
+guard constructorCount(in: sanitized) == 1,
+      let methodRange = sanitized.range(of: #"func\s+applicationDidFinishLaunching\s*\("#, options: .regularExpression),
+      let openingBrace = sanitized[methodRange.upperBound...].firstIndex(of: "{") else {
+    exit(1)
+}
+
+var depth = 0
+var closingBrace: String.Index?
+for index in sanitized[openingBrace...].indices {
+    switch sanitized[index] {
+    case "{": depth += 1
+    case "}":
+        depth -= 1
+        if depth == 0 {
+            closingBrace = index
+            break
+        }
+    default: break
+    }
+    if closingBrace != nil {
+        break
+    }
+}
+
+guard let closingBrace,
+      constructorCount(in: String(sanitized[openingBrace...closingBrace])) == 0 else {
+    exit(1)
+}
+SWIFT
 
 grep -F 'https://github.com/sparkle-project/Sparkle' "$project" >/dev/null ||
     fail 'Xcode project must declare the official Sparkle package'

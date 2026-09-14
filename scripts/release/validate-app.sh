@@ -62,6 +62,11 @@ case "$executable_name" in
     ''|.|..|*/*|*\\*) fail 'application executable name must be a single safe path component' ;;
 esac
 executable=$app/Contents/MacOS/$executable_name
+sparkle_feed_url='https://nickghardwick.github.io/LinkGate/updates/appcast.xml'
+sparkle_public_ed_key='En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU='
+sparkle_framework=$app/Contents/Frameworks/Sparkle.framework
+sparkle_runtime=$sparkle_framework/Versions/B
+sparkle_info_plist=$sparkle_runtime/Resources/Info.plist
 
 [ "$product" = "$PRODUCT_NAME" ] || fail 'application product does not match release policy'
 [ "$bundle_id" = "$BUNDLE_ID" ] || fail 'application bundle identifier does not match release policy'
@@ -71,10 +76,96 @@ executable=$app/Contents/MacOS/$executable_name
 [ "$deployment_target" = "$DEPLOYMENT_TARGET" ] || fail 'application deployment target does not match release policy'
 [ "$deployment_target" = "$(metadata_value deployment_target)" ] || fail 'application deployment target does not match metadata'
 [ -f "$executable" ] && [ -x "$executable" ] || fail 'application executable is missing or not executable'
+[ "$(plist_value SUFeedURL)" = "$sparkle_feed_url" ] || fail 'application Sparkle feed URL does not match release policy'
+[ "$(plist_value SUPublicEDKey)" = "$sparkle_public_ed_key" ] || fail 'application Sparkle public Ed25519 key does not match release policy'
 
-if find "$app/Contents" -path "$app/Contents/_CodeSignature" -prune -o -name _CodeSignature -print | grep -q .; then
-    fail 'application contains a nested _CodeSignature directory'
+for private_key_configuration in SUPrivateEDKey SUPrivateEDKeyFile SUPrivateDSAKeyFile; do
+    if plutil -extract "$private_key_configuration" raw -o - "$plist" >/dev/null 2>&1; then
+        fail 'application Info.plist contains private Sparkle key configuration'
+    fi
+done
+if find "$app/Contents" -iname '*private*key*' -print -quit | grep -q .; then
+    fail 'application bundle contains private key material filename'
 fi
+
+expected_contents_entries=$(cat <<'PATHS'
+Contents/Frameworks
+Contents/Info.plist
+Contents/MacOS
+Contents/PkgInfo
+Contents/Resources
+Contents/_CodeSignature
+PATHS
+)
+actual_contents_entries=$(find "$app/Contents" -mindepth 1 -maxdepth 1 -print | sed "s|^$app/||" | LC_ALL=C sort)
+[ "$actual_contents_entries" = "$expected_contents_entries" ] || fail 'application Contents entries do not match release policy'
+[ -d "$app/Contents/Frameworks" ] || fail 'application Frameworks directory is missing'
+[ -f "$app/Contents/Info.plist" ] || fail 'application Info.plist is missing'
+[ -d "$app/Contents/MacOS" ] || fail 'application MacOS directory is missing'
+[ -f "$app/Contents/PkgInfo" ] || fail 'application PkgInfo is missing'
+[ -d "$app/Contents/Resources" ] || fail 'application Resources directory is missing'
+
+expected_resource_entries=$(cat <<'PATHS'
+Contents/Resources/AppIcon.icns
+Contents/Resources/Assets.car
+PATHS
+)
+actual_resource_entries=$(find "$app/Contents/Resources" -mindepth 1 -maxdepth 1 -print | sed "s|^$app/||" | LC_ALL=C sort)
+[ "$actual_resource_entries" = "$expected_resource_entries" ] || fail 'application Resources entries do not match release policy'
+for resource in "$app/Contents/Resources/AppIcon.icns" "$app/Contents/Resources/Assets.car"; do
+    [ -f "$resource" ] || fail 'application resource is missing or is not a regular file'
+done
+
+expected_code_signatures=$(cat <<'PATHS'
+Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/_CodeSignature
+Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/_CodeSignature
+Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/_CodeSignature
+Contents/Frameworks/Sparkle.framework/Versions/B/_CodeSignature
+Contents/_CodeSignature
+PATHS
+)
+actual_code_signatures=$(find "$app" -type d -name _CodeSignature -print | sed "s|^$app/||" | LC_ALL=C sort)
+[ "$actual_code_signatures" = "$expected_code_signatures" ] || fail 'application code signature directories do not match the approved Sparkle runtime'
+
+[ -d "$sparkle_framework" ] || fail 'application is missing the Sparkle framework'
+[ -f "$sparkle_info_plist" ] || fail 'Sparkle framework Info.plist is missing'
+sparkle_version=$(plutil -extract CFBundleShortVersionString raw -o - "$sparkle_info_plist" 2>/dev/null) || fail 'Sparkle framework version is missing'
+[ "$sparkle_version" = '2.9.6' ] || fail 'Sparkle framework version does not match release policy'
+
+expected_embedded_code=$(cat <<'PATHS'
+Contents/Frameworks/Sparkle.framework
+Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app
+Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc
+Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc
+PATHS
+)
+actual_embedded_code=$(find "$app/Contents" \( \( -type d \( -name '*.framework' -o -name '*.app' -o -name '*.xpc' \) \) -o -name '*.dylib' \) -print | sed "s|^$app/||" | LC_ALL=C sort)
+[ "$actual_embedded_code" = "$expected_embedded_code" ] || fail 'application contains unexpected embedded code'
+
+framework_entries=$(find "$app/Contents/Frameworks" -mindepth 1 -maxdepth 1 -print | sed "s|^$app/||" | LC_ALL=C sort)
+[ "$framework_entries" = 'Contents/Frameworks/Sparkle.framework' ] || fail 'application frameworks do not match the approved Sparkle runtime'
+
+for sparkle_executable in \
+    "$sparkle_runtime/Sparkle" \
+    "$sparkle_runtime/Autoupdate" \
+    "$sparkle_runtime/Updater.app/Contents/MacOS/Updater" \
+    "$sparkle_runtime/XPCServices/Downloader.xpc/Contents/MacOS/Downloader" \
+    "$sparkle_runtime/XPCServices/Installer.xpc/Contents/MacOS/Installer"; do
+    [ -f "$sparkle_executable" ] && [ -x "$sparkle_executable" ] || fail 'Sparkle runtime executable is missing or not executable'
+done
+
+expected_executables=$(cat <<PATHS
+Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate
+Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle
+Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app/Contents/MacOS/Updater
+Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader
+Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer
+Contents/MacOS/$executable_name
+PATHS
+)
+actual_executables=$(find "$app/Contents" -type f -perm -111 -print | sed "s|^$app/||" | LC_ALL=C sort)
+[ "$actual_executables" = "$expected_executables" ] || fail 'application contains unexpected executable code'
+
 if find "$app" \( -name '*.dSYM' -o -name '*.debug.dylib' \) -print | grep -q .; then
     fail 'application contains debug artifacts'
 fi

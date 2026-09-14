@@ -650,6 +650,7 @@ assert_file "$observed"
 assert_not_contains "$stub_log" 'spctl --assess --type execute --verbose=4'
 
 new_app_case stapled
+: >"$app/Contents/CodeResources"
 run_validate_app_require_stapled_ticket "$app" "$valid_metadata" "$observed"
 assert_file "$observed"
 assert_contains "$stub_log" 'xcrun stapler validate'
@@ -658,7 +659,12 @@ assert_precedes "$stub_log" 'xcrun stapler validate' 'spctl --assess --type exec
 assert_json_value "$observed" '.notarized' 'true'
 assert_json_value "$observed" '.stapled' 'true'
 
+new_app_case stapled-missing-code-resources
+assert_fails stapled-missing-code-resources run_validate_app_require_stapled_ticket "$app" "$valid_metadata" "$observed"
+assert_no_file "$observed"
+
 new_app_case stapled-invalid-ticket
+: >"$app/Contents/CodeResources"
 assert_fails stapled-invalid-ticket run_validate_app_require_stapled_ticket "$app" "$valid_metadata" "$observed" STAPLER_VALIDATE_OK=0
 assert_no_file "$observed"
 assert_contains "$stub_log" 'xcrun stapler validate'
@@ -737,6 +743,7 @@ new_app_case nested-sparkle-invalid-signature
 assert_validation_failure nested-sparkle-invalid-signature "$app" "$valid_metadata" "$observed" NESTED_CODESIGN_VERIFY_TARGET=Installer.xpc NESTED_CODESIGN_VERIFY_OK=0
 
 new_app_case gatekeeper-rejection
+: >"$app/Contents/CodeResources"
 assert_fails gatekeeper-rejection run_validate_app_require_stapled_ticket "$app" "$valid_metadata" "$observed" SPCTL_OK=0
 assert_no_file "$observed"
 assert_contains "$stub_log" 'xcrun stapler validate'

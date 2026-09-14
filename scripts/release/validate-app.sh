@@ -97,6 +97,12 @@ Contents/Resources
 Contents/_CodeSignature
 PATHS
 )
+if [ "$require_stapled_ticket" = true ]; then
+    # stapler stores the validated ticket in this regular file. It must not
+    # exist in the pre-notarization app validation path.
+    expected_contents_entries=$(printf '%s\nContents/CodeResources\n' "$expected_contents_entries" | LC_ALL=C sort)
+    [ -f "$app/Contents/CodeResources" ] || fail 'stapled application CodeResources ticket is missing'
+fi
 actual_contents_entries=$(find "$app/Contents" -mindepth 1 -maxdepth 1 -print | sed "s|^$app/||" | LC_ALL=C sort)
 [ "$actual_contents_entries" = "$expected_contents_entries" ] || fail 'application Contents entries do not match release policy'
 [ -d "$app/Contents/Frameworks" ] || fail 'application Frameworks directory is missing'

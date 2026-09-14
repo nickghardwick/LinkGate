@@ -113,6 +113,93 @@ final class DefaultBrowserServiceTests: XCTestCase {
         XCTAssertEqual(status, DefaultBrowserStatus(httpIsDefault: false, httpsIsDefault: false))
     }
 
+    // Task 3 acceptance 2: diagnostics preserve the existing exact-path ownership rule while
+    // independently identifying an installed LinkGate copy that has the same bundle identifier.
+    func testDiagnosticStatusReportsExactAndWrongCopyIndependentlyForEachScheme() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let developmentCopyURL = URL(fileURLWithPath: "/Users/alice/Library/Developer/Xcode/DerivedData/LinkGate/Build/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": linkGateURL, "https": developmentCopyURL],
+            bundleIdentifiers: [
+                linkGateURL: "com.example.LinkGate",
+                developmentCopyURL: "com.example.LinkGate",
+            ]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+
+        let diagnosticStatus = service.diagnosticStatus()
+
+        XCTAssertEqual(
+            diagnosticStatus,
+            DefaultBrowserDiagnosticStatus(
+                http: .exactCurrentApplication,
+                https: .sameBundleIdentifierAtDifferentLocation(.developmentCopy)
+            )
+        )
+        XCTAssertEqual(
+            service.status(),
+            DefaultBrowserStatus(httpIsDefault: true, httpsIsDefault: false),
+            "The diagnostic boundary must not relax exact-path default-handler behavior."
+        )
+    }
+
+    // Task 3 acceptance 2: another application is identifiable only by bundle ID, and either a
+    // missing resolved application or a missing bundle ID remains unresolved.
+    func testDiagnosticStatusReportsOtherApplicationAndUnresolvedHandlerWithoutPaths() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let otherURL = URL(fileURLWithPath: "/Volumes/private/Other Browser.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": otherURL],
+            bundleIdentifiers: [otherURL: "org.example.other-browser"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.example.LinkGate"
+        )
+
+        XCTAssertEqual(
+            service.diagnosticStatus(),
+            DefaultBrowserDiagnosticStatus(
+                http: .otherApplication(bundleIdentifier: "org.example.other-browser"),
+                https: .unresolved
+            )
+        )
+
+        workspace.applicationsToOpen = ["http": otherURL, "https": linkGateURL]
+        workspace.bundleIdentifiers = [otherURL: "org.example.other-browser"]
+
+        XCTAssertEqual(
+            service.diagnosticStatus(),
+            DefaultBrowserDiagnosticStatus(http: .otherApplication(bundleIdentifier: "org.example.other-browser"), https: .unresolved),
+            "A resolved handler without a bundle identifier is not another application's identity."
+        )
+    }
+
+    // Task 3 acceptance 2: a service without LinkGate's own bundle identifier cannot establish
+    // ownership, even when Launch Services resolves the current bundle path.
+    func testDiagnosticStatusIsUnresolvedWhenCurrentBundleIdentifierIsMissing() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": linkGateURL, "https": linkGateURL],
+            bundleIdentifiers: [linkGateURL: "com.example.LinkGate"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: nil
+        )
+
+        XCTAssertEqual(
+            service.diagnosticStatus(),
+            DefaultBrowserDiagnosticStatus(http: .unresolved, https: .unresolved)
+        )
+    }
+
     func testRequestSetsHTTPThenHTTPSAndCompletesAfterBothSucceed() {
         let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
         let workspace = DefaultBrowserWorkspaceFake()

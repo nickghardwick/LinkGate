@@ -47,6 +47,26 @@ final class UpdateControllerTests: XCTestCase {
         XCTAssertEqual(controller.latestHandlerPreservationResult, expectedSummary)
     }
 
+    // Task 3 acceptance 5 and 6: the new read-only diagnostic boundary carries the existing
+    // in-memory preservation summary. Sparkle's property-to-value mapping is intentionally
+    // verified by build/source inspection rather than by replacing vendor internals in XCTest.
+    func testDiagnosticStateRetainsLatestInMemoryHandlerPreservationResult() {
+        let expectedSummary = HandlerPreservationRestorationSummary(
+            disposition: .verificationFailed,
+            http: .restored,
+            https: .verificationFailed
+        )
+        let preservation = HandlerPreservationRecorder(restorationSummary: expectedSummary)
+        let controller = UpdateController(
+            handlerPreservation: preservation,
+            startingUpdater: false
+        )
+
+        controller.restorePreservedHandlersIfNeeded()
+
+        XCTAssertEqual(controller.diagnosticState.latestHandlerPreservationResult, expectedSummary)
+    }
+
     private func makeAppcastItem(displayVersion: String, buildVersion: String) -> SUAppcastItem {
         let archiver = NSKeyedArchiver(requiringSecureCoding: true)
         archiver.encode(displayVersion, forKey: "displayVersionString")

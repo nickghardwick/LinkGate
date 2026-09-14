@@ -77,6 +77,20 @@ final class DiagnosticPrivacyTests: XCTestCase {
         XCTAssertEqual(sanitizedInstalledPath, "/Applications/LinkGate.app")
     }
 
+    func testSanitizedLocationPathRedactsUnknownUserSpecificLocation() {
+        let unknownLocation = URL(fileURLWithPath: "/Volumes/alice-private/Browser Builds/LinkGate.app")
+
+        let sanitizedPath = DiagnosticLocation.sanitizedPath(for: unknownLocation)
+
+        XCTAssertEqual(sanitizedPath, "Other location")
+        assertDoesNotContain(sanitizedPath, anyOf: [
+            "alice-private",
+            "Browser Builds",
+            "/Volumes",
+            "LinkGate.app",
+        ])
+    }
+
     func testBrowserOpenErrorsUseOnlyTheClosedBrowserOpenFailureCategory() {
         let fixtures: [(error: Error, secrets: [String])] = [
             (

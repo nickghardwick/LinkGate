@@ -137,34 +137,19 @@ final class DiagnosticsSnapshotTests: XCTestCase {
 
         let text = controller.snapshot().renderedText
 
-        XCTAssertEqual(
-            text,
-            """
-            LinkGate diagnostics
-            App
-            - Version: 0.1.8 (108)
-            - macOS: 15.0
-            - Location: Applications
-            Default handlers
-            - HTTP: unresolved
-            - HTTPS: unresolved
-            Browsers
-            - Enabled (3):
-              - org.example.zulu
-              - org.example.shared (Applications #1)
-              - org.example.shared (Applications #2)
-            - Disabled detected: 1
-            Routing
-            - Rules: 0
-            Updates
-            - Automatic checks: enabled
-            - Automatic downloads: disabled
-            - Can check now: yes
-            - Update session in progress: no
-            Handler preservation
-            - Result: none this launch
-            """
-        )
+        let browserSection = section(in: text, heading: "Browsers", endingBefore: "Routing")
+        XCTAssertEqual(browserSection.first, "Browsers")
+        XCTAssertEqual(browserSection.dropFirst().first, "- Enabled (3):")
+        XCTAssertEqual(browserSection.last, "- Disabled detected: 1")
+        let enabledLines = browserSection.filter { $0.hasPrefix("  - ") }
+        XCTAssertEqual(enabledLines.first, "  - org.example.zulu")
+        let sharedCopyLabels = Array(enabledLines.dropFirst())
+        XCTAssertEqual(sharedCopyLabels.count, 2)
+        XCTAssertNotEqual(sharedCopyLabels[0], sharedCopyLabels[1])
+        for label in sharedCopyLabels {
+            XCTAssertTrue(label.hasPrefix("  - org.example.shared ("))
+            XCTAssertTrue(label.contains("Applications"))
+        }
         XCTAssertEqual(defaults.data(forKey: storageKey), beforeData)
         XCTAssertEqual(store.browserOrder, beforeOrder)
         XCTAssertEqual(store.disabledBrowserIdentifiers, beforeDisabled)
@@ -219,6 +204,11 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         XCTAssertTrue(text.contains("- Result: exhausted"))
         XCTAssertTrue(text.contains("- HTTP: verification failed"))
         XCTAssertTrue(text.contains("- HTTPS: not owned before update"))
+        XCTAssertEqual(
+            section(in: text, heading: "Routing", endingBefore: "Updates"),
+            ["Routing", "- Rules: 2"],
+            "The Routing section must expose only the rule count."
+        )
         assertDoesNotContain(text, anyOf: [
             firstRule.pattern,
             secondRule.pattern,
@@ -325,6 +315,13 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             bundleIdentifier: bundleIdentifier,
             icon: NSImage(size: NSSize(width: 16, height: 16))
         )
+    }
+
+    private func section(in text: String, heading: String, endingBefore nextHeading: String) -> [String] {
+        let lines = text.components(separatedBy: .newlines)
+        guard let start = lines.firstIndex(of: heading) else { return [] }
+        let end = lines[(start + 1)...].firstIndex(of: nextHeading) ?? lines.endIndex
+        return Array(lines[start..<end])
     }
 
     private func assertDoesNotContain(

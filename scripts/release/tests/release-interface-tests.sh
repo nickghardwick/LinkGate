@@ -118,7 +118,8 @@ for release_test in \
     release-support-tests.sh \
     release-preflight-tests.sh \
     release-workflow-tests.sh \
-    release-interface-tests.sh; do
+    release-interface-tests.sh \
+    sparkle-integration-tests.sh; do
     test_command="./scripts/release/tests/$release_test"
     printf '%s\n' "$verify_recipe" | grep -F -- "$test_command" >/dev/null ||
         fail "make verify must invoke $release_test"

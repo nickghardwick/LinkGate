@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		01B2C96930521FF300735FD0 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 01B2C96A30521FF300735FD0 /* XCTest.framework */; };
+		01B2C97030521FF300735FD0 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 01B2C97130521FF300735FD0 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				01B2C97030521FF300735FD0 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +120,7 @@
 			);
 			name = LinkGate;
 			packageProductDependencies = (
+				01B2C97130521FF300735FD0 /* Sparkle */,
 			);
 			productName = LinkGate;
 			productReference = 01B2C95130521FF100735FD0 /* LinkGate.app */;
@@ -175,6 +178,9 @@
 			productRefGroup = 01B2C95230521FF100735FD0 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				01B2C97230521FF300735FD0 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			targets = (
 				01B2C95030521FF100735FD0 /* LinkGate */,
 				01B2C96630521FF300735FD0 /* LinkGateTests */,
@@ -198,6 +204,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		01B2C97230521FF300735FD0 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion; version = 2.9.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		01B2C97130521FF300735FD0 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 01B2C97230521FF300735FD0 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXSourcesBuildPhase section */
 		01B2C94D30521FF100735FD0 /* Sources */ = {

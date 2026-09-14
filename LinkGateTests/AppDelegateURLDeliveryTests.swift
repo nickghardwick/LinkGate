@@ -10,11 +10,14 @@ import XCTest
 // never present unrelated Settings windows, and closing all windows does not terminate the utility.
 // A3: URL receipt itself does not activate LinkGate. The chooser owns activation when user input
 // is needed, so an automatic route remains unobtrusive.
+// A4: Lifecycle notifications and incoming URLs never initiate an update check. The only update
+// command is the user-invoked status-menu command.
 // Required natural AppDelegate composition initializer:
 // @MainActor init(
 //     selectionCoordinator: SelectionCoordinator,
 //     incomingURLHandler: IncomingURLHandler,
-//     chooserPanelController: ChooserPanelController
+//     chooserPanelController: ChooserPanelController,
+//     updateChecking: any UpdateChecking
 // )
 @MainActor
 final class AppDelegateURLDeliveryTests: XCTestCase {
@@ -150,6 +153,25 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         XCTAssertEqual(settingsPresentationCount, 0)
     }
 
+    func testRepeatedLifecycleNotificationsNeverInitiateAnUpdateCheck() {
+        let updateChecker = UpdateCheckRecorder(canCheckForUpdates: true)
+        let delegate = makeDelegate(updateChecker: updateChecker)
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+
+        XCTAssertEqual(updateChecker.checkCount, 0)
+    }
+
+    func testURLDeliveryNeverInitiatesAnUpdateCheck() {
+        let updateChecker = UpdateCheckRecorder(canCheckForUpdates: true)
+        let delegate = makeDelegate(updateChecker: updateChecker)
+
+        delegate.application(NSApplication.shared, open: [URL(string: "https://example.com/path")!])
+
+        XCTAssertEqual(updateChecker.checkCount, 0)
+    }
+
     func testManualOpenAndReopenDoNotDisplaceChoosingRequest() {
         let candidate = makeCandidate(bundleIdentifier: "com.example.browser")
         let discovery = FixedDiscovery(candidates: [candidate])
@@ -230,7 +252,8 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
     private func makeDelegate(
         coordinator: SelectionCoordinator? = nil,
         handler: IncomingURLHandler,
-        settingsPresenter: (() -> Void)? = nil
+        settingsPresenter: (() -> Void)? = nil,
+        updateChecker: (any UpdateChecking)? = nil
     ) -> AppDelegate {
         let coordinator = coordinator ?? SelectionCoordinator(
             discoveryService: EmptyDiscoveryService(),
@@ -240,15 +263,20 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
             coordinator: coordinator,
             applicationActivator: { _ in }
         )
+        let updateChecking = updateChecker ?? UpdateCheckRecorder(canCheckForUpdates: true)
         return AppDelegate(
             selectionCoordinator: coordinator,
             incomingURLHandler: handler,
             chooserPanelController: panelController,
-            settingsPresenter: settingsPresenter
+            settingsPresenter: settingsPresenter,
+            updateChecking: updateChecking
         )
     }
 
-    private func makeDelegate(settingsPresenter: @escaping () -> Void) -> AppDelegate {
+    private func makeDelegate(
+        settingsPresenter: @escaping () -> Void,
+        updateChecker: (any UpdateChecking)? = nil
+    ) -> AppDelegate {
         let coordinator = SelectionCoordinator(
             discoveryService: EmptyDiscoveryService(),
             openingService: UnusedOpeningService()
@@ -256,8 +284,13 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         return makeDelegate(
             coordinator: coordinator,
             handler: IncomingURLHandler(destination: coordinator),
-            settingsPresenter: settingsPresenter
+            settingsPresenter: settingsPresenter,
+            updateChecker: updateChecker
         )
+    }
+
+    private func makeDelegate(updateChecker: any UpdateChecking) -> AppDelegate {
+        makeDelegate(settingsPresenter: {}, updateChecker: updateChecker)
     }
 
     private func makeDelegate() -> AppDelegate {
@@ -333,6 +366,20 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
             return nil
         }
         return context.presentationID
+    }
+}
+
+@MainActor
+private final class UpdateCheckRecorder: UpdateChecking {
+    var canCheckForUpdates: Bool
+    private(set) var checkCount = 0
+
+    init(canCheckForUpdates: Bool) {
+        self.canCheckForUpdates = canCheckForUpdates
+    }
+
+    func checkForUpdates() {
+        checkCount += 1
     }
 }
 

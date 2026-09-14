@@ -57,6 +57,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://nickghardwick.github.io/LinkGate/updates/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>En8Ohgkw8WSkc/10bYvg692dCDZUeb+w30bCOqR+qkU=</string>
 	<key>LSUIElement</key>
 	<true/>
 </dict>

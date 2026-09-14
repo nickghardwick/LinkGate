@@ -5,7 +5,7 @@ DERIVED_DATA_PATH := build/DerivedData
 HOST_ARCH := $(shell uname -m)
 MACOS_DESTINATION := platform=macOS,arch=$(HOST_ARCH)
 
-XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIGURATION) -destination '$(MACOS_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH)
+XCODEBUILD := xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration $(CONFIGURATION) -destination '$(MACOS_DESTINATION)' -derivedDataPath $(DERIVED_DATA_PATH) -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile -skipPackageUpdates
 
 .PHONY: build test verify release-tests publish-beta-tests publish-beta-check publish-beta verify-published-beta run release
 
@@ -26,6 +26,7 @@ verify:
 	./scripts/release/tests/release-preflight-tests.sh || status=$$?; \
 	./scripts/release/tests/release-workflow-tests.sh || status=$$?; \
 	./scripts/release/tests/release-interface-tests.sh || status=$$?; \
+	./scripts/release/tests/sparkle-integration-tests.sh || status=$$?; \
 	./scripts/release/tests/publish-beta-tests.sh || status=$$?; \
 	exit $$status
 
@@ -34,6 +35,7 @@ release-tests:
 	./scripts/release/tests/release-preflight-tests.sh
 	./scripts/release/tests/release-workflow-tests.sh
 	./scripts/release/tests/release-interface-tests.sh
+	./scripts/release/tests/sparkle-integration-tests.sh
 	./scripts/release/tests/publish-beta-tests.sh
 
 publish-beta-tests:

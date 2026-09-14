@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let incomingURLHandler: IncomingURLHandler
     private let chooserPanelController: ChooserPanelController
     private let settingsPresenter: () -> Void
+    private let updateController: UpdateController?
+    private let updateChecking: any UpdateChecking
     private var statusItemController: StatusItemController?
 
     override init() {
@@ -28,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ruleProvider: routingRuleStore,
             browserOrderStore: routingRuleStore
         )
+        let updateController = UpdateController()
 
         self.routingRuleStore = routingRuleStore
         browserDiscoveryService = discoveryService
@@ -43,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         )
         settingsPresenter = { settingsController.showWindow(nil) }
+        self.updateController = updateController
+        updateChecking = updateController
         super.init()
     }
 
@@ -52,7 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chooserPanelController: ChooserPanelController,
         routingRuleStore: RoutingRuleStore? = nil,
         browserDiscoveryService: BrowserDiscoveryService? = nil,
-        settingsPresenter: (() -> Void)? = nil
+        settingsPresenter: (() -> Void)? = nil,
+        updateChecking: any UpdateChecking
     ) {
         self.routingRuleStore = routingRuleStore ?? UserDefaultsRoutingRuleStore()
         self.browserDiscoveryService = browserDiscoveryService ?? NSWorkspaceBrowserDiscoveryService(
@@ -65,6 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.incomingURLHandler = incomingURLHandler
         self.chooserPanelController = chooserPanelController
         self.settingsPresenter = settingsPresenter ?? {}
+        self.updateController = nil
+        self.updateChecking = updateChecking
         super.init()
     }
 
@@ -75,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItemController = StatusItemController(
             settingsPresenter: { [weak self] in self?.showSettings() },
+            updateChecking: updateChecking,
             applicationTerminator: { NSApp.terminate(nil) }
         )
     }

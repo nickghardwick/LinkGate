@@ -408,8 +408,10 @@ final class DiagnosticsSnapshotTests: XCTestCase {
             applicationURL: URL(fileURLWithPath: "/Applications/LinkGate.app")
         )
         let pasteboard = NSPasteboard.withUniqueName()
+        let obsoleteType = NSPasteboard.PasteboardType("com.linkgate.tests.obsolete")
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.setString("stale private diagnostic", forType: .string))
+        XCTAssertTrue(pasteboard.setString("obsolete non-string payload", forType: obsoleteType))
 
         _ = try store.create(
             matchType: .urlPrefix,
@@ -434,6 +436,9 @@ final class DiagnosticsSnapshotTests: XCTestCase {
 
         controller.copyDiagnostics(to: pasteboard)
 
+        let items = try XCTUnwrap(pasteboard.pasteboardItems)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(Set(items[0].types), Set([.string]))
         XCTAssertEqual(
             pasteboard.string(forType: .string),
             """

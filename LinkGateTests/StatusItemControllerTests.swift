@@ -65,6 +65,7 @@ final class StatusItemControllerTests: XCTestCase {
 
         XCTAssertFalse(controller.menu.items[1].isEnabled)
         XCTAssertTrue(controller.menu.items[2].isEnabled)
+        XCTAssertTrue(controller.validateMenuItem(controller.menu.items[2]))
 
         controller.menu.performActionForItem(at: 1)
         controller.menu.performActionForItem(at: 2)

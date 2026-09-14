@@ -137,6 +137,10 @@ class RetrospectiveTests(unittest.TestCase):
             result = verify_published_beta(root, config_path, "0.1.4", runner=Runner(), http=Http(), tools=Tools())
             self.assertEqual(result["outcome"], "RETROSPECTIVE_ACCEPTED")
             self.assertEqual(result["official_sparkle_verification"], "PASS")
+            self.assertEqual(result["original_outcome"], "PUBLISHED")
+            self.assertNotIn("original_incomplete_reason", result)
+            self.assertNotIn("root_cause", result)
+            self.assertNotIn("tooling_fix_commit", result)
             self.assertTrue((root / ".scratch/publication-evidence/0.1.4/retrospective-acceptance.json").is_file())
 
 

@@ -269,16 +269,11 @@ def verify_published_beta(
         except json.JSONDecodeError:
             historical = {"unreadable_historical_acceptance": True}
     pages_tip = pages_sha
-    head = runner.run(["git", "rev-parse", "HEAD"], cwd=repo_root)
-    tooling_fix_commit = head.stdout.strip() if head.returncode == 0 else ""
     timestamp = (clock or (lambda: datetime.now(timezone.utc)))().astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     result = {
         "outcome": "RETROSPECTIVE_ACCEPTED",
         "original_outcome": historical.get("outcome", "PUBLISHED"),
-        "original_incomplete_reason": "post-publication independent verification invoked /usr/bin/openssl (LibreSSL 3.3.6), which does not support Ed25519",
         "historical_publication_message": historical.get("message", "original publication acceptance record retained"),
-        "root_cause": "incompatible /usr/bin/openssl wiring",
-        "tooling_fix_commit": tooling_fix_commit,
         "retrospective_verified_at": timestamp,
         "source_commit": record.source_commit,
         "marketing_version": record.marketing_version,

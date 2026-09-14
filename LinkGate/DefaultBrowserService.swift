@@ -72,9 +72,21 @@ final class NSWorkspaceDefaultBrowserService: DefaultBrowserService {
     private func isDefault(forScheme scheme: String) -> Bool {
         guard let expectedBundleIdentifier = bundleIdentifier,
               let schemeURL = URL(string: "\(scheme)://example.com"),
-              let resolvedURL = workspace.applicationURL(toOpen: schemeURL)
+              let resolvedURL = workspace.applicationURL(toOpen: schemeURL),
+              refersToSameApplication(resolvedURL, applicationURL)
         else { return false }
         return workspace.bundleIdentifier(at: resolvedURL) == expectedBundleIdentifier
+    }
+
+    private func refersToSameApplication(_ lhs: URL, _ rhs: URL) -> Bool {
+        normalizedApplicationPath(lhs) == normalizedApplicationPath(rhs)
+    }
+
+    private func normalizedApplicationPath(_ url: URL) -> String {
+        url.standardizedFileURL
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+            .path
     }
 }
 

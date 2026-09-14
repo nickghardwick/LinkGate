@@ -8,18 +8,15 @@ import XCTest
 // completion. These tests exercise the workspace adapter seam rather than macOS global defaults.
 @MainActor
 final class DefaultBrowserServiceTests: XCTestCase {
-    func testStatusLooksUpBothSchemesAndReportsDefaultOnlyWhenLinkGateHandlesEach() {
+    func testStatusLooksUpBothSchemesAndReportsDefaultWhenTheCurrentBundleOwnsEach() {
         let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
-        let httpBrowserURL = URL(fileURLWithPath: "/Applications/HTTP Browser.app")
-        let httpsBrowserURL = URL(fileURLWithPath: "/Applications/HTTPS Browser.app")
         let workspace = DefaultBrowserWorkspaceFake(
             applicationsToOpen: [
-                "http": httpBrowserURL,
-                "https": httpsBrowserURL,
+                "http": linkGateURL,
+                "https": linkGateURL,
             ],
             bundleIdentifiers: [
-                httpBrowserURL: "com.example.LinkGate",
-                httpsBrowserURL: "com.example.LinkGate",
+                linkGateURL: "com.example.LinkGate",
             ]
         )
         let service = NSWorkspaceDefaultBrowserService(
@@ -35,6 +32,66 @@ final class DefaultBrowserServiceTests: XCTestCase {
         XCTAssertTrue(status.httpsIsDefault)
         XCTAssertTrue(status.isDefault)
         XCTAssertTrue(workspace.setDefaultCalls.isEmpty)
+    }
+
+    func testStatusTreatsSameBundleIdentifierAtAnotherPathAsNotDefault() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let fixtureURL = URL(fileURLWithPath: "/repo/fixtures/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": fixtureURL, "https": fixtureURL],
+            bundleIdentifiers: [fixtureURL: "com.nickghardwick.LinkGate"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.nickghardwick.LinkGate"
+        )
+
+        let status = service.status()
+
+        XCTAssertEqual(status, DefaultBrowserStatus(httpIsDefault: false, httpsIsDefault: false))
+        XCTAssertFalse(status.isDefault)
+    }
+
+    func testStatusReportsOnlyTheSchemeResolvedToTheCurrentBundle() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let fixtureURL = URL(fileURLWithPath: "/repo/fixtures/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": linkGateURL, "https": fixtureURL],
+            bundleIdentifiers: [
+                linkGateURL: "com.nickghardwick.LinkGate",
+                fixtureURL: "com.nickghardwick.LinkGate",
+            ]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.nickghardwick.LinkGate"
+        )
+
+        let status = service.status()
+
+        XCTAssertEqual(status, DefaultBrowserStatus(httpIsDefault: true, httpsIsDefault: false))
+        XCTAssertFalse(status.isDefault)
+    }
+
+    func testStatusRecognizesStandardizedEquivalentBundleURLs() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let alternateSpelling = URL(fileURLWithPath: "/Applications/Current/../LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": alternateSpelling, "https": alternateSpelling],
+            bundleIdentifiers: [alternateSpelling: "com.nickghardwick.LinkGate"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.nickghardwick.LinkGate"
+        )
+
+        XCTAssertEqual(
+            service.status(),
+            DefaultBrowserStatus(httpIsDefault: true, httpsIsDefault: true)
+        )
     }
 
     func testStatusTreatsMissingOrWrongResolvedApplicationAsNotDefault() {
@@ -193,6 +250,31 @@ final class DefaultBrowserServiceTests: XCTestCase {
         default:
             XCTFail("Expected success after requesting the only non-default scheme, got \(String(describing: result)).")
         }
+    }
+
+    func testRequestDoesNotSkipSameBundleIdentifierAtAnotherPath() {
+        let linkGateURL = URL(fileURLWithPath: "/Applications/LinkGate.app")
+        let fixtureURL = URL(fileURLWithPath: "/repo/fixtures/LinkGate.app")
+        let workspace = DefaultBrowserWorkspaceFake(
+            applicationsToOpen: ["http": fixtureURL, "https": fixtureURL],
+            bundleIdentifiers: [fixtureURL: "com.nickghardwick.LinkGate"]
+        )
+        let service = NSWorkspaceDefaultBrowserService(
+            workspace: workspace,
+            applicationURL: linkGateURL,
+            bundleIdentifier: "com.nickghardwick.LinkGate"
+        )
+
+        service.requestDefault { _ in }
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http"])
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.applicationURL), [linkGateURL])
+
+        workspace.applicationsToOpen["http"] = linkGateURL
+        workspace.completeSetDefault(forScheme: "http", error: nil)
+
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.scheme), ["http", "https"])
+        XCTAssertEqual(workspace.setDefaultCalls.map(\.applicationURL), [linkGateURL, linkGateURL])
     }
 
     func testRequestCompletesImmediatelyWhenBothSchemesAlreadyUseLinkGate() {

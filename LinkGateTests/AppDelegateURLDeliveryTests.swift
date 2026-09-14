@@ -180,6 +180,27 @@ final class AppDelegateURLDeliveryTests: XCTestCase {
         XCTAssertEqual(updateChecker.checkCount, 0)
     }
 
+    func testLaunchRestorationIsOneShotAndDoesNotBlockIncomingURLDelivery() {
+        let destination = RecordingDestination()
+        let handler = IncomingURLHandler(destination: destination)
+        let updateChecker = UpdateCheckRecorder(canCheckForUpdates: true)
+        let handlerRestorer = HandlerPreservationRestoreRecorder()
+        let delegate = makeDelegate(
+            handler: handler,
+            updateChecker: updateChecker,
+            handlerPreservationRestoring: handlerRestorer
+        )
+        let incomingURL = URL(string: "https://example.com/during-restoration?arrival=one")!
+
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        delegate.application(NSApplication.shared, open: [incomingURL])
+
+        XCTAssertEqual(handlerRestorer.restoreCallCount, 1)
+        XCTAssertEqual(updateChecker.checkCount, 0)
+        XCTAssertEqual(destination.receivedURLs, [incomingURL])
+    }
+
     func testURLDeliveryNeverInitiatesAnUpdateCheck() {
         let updateChecker = UpdateCheckRecorder(canCheckForUpdates: true)
         let delegate = makeDelegate(updateChecker: updateChecker)

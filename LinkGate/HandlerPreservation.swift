@@ -8,6 +8,65 @@ struct HandlerPreservationRecord: Codable, Equatable {
     let applicationURL: URL
     let ownedHTTP: Bool
     let ownedHTTPS: Bool
+    let attemptCount: Int
+
+    init(
+        sourceVersion: String,
+        sourceBuild: String,
+        targetVersion: String,
+        targetBuild: String,
+        applicationURL: URL,
+        ownedHTTP: Bool,
+        ownedHTTPS: Bool,
+        attemptCount: Int
+    ) {
+        self.sourceVersion = sourceVersion
+        self.sourceBuild = sourceBuild
+        self.targetVersion = targetVersion
+        self.targetBuild = targetBuild
+        self.applicationURL = applicationURL
+        self.ownedHTTP = ownedHTTP
+        self.ownedHTTPS = ownedHTTPS
+        self.attemptCount = attemptCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourceVersion
+        case sourceBuild
+        case targetVersion
+        case targetBuild
+        case applicationURL
+        case ownedHTTP
+        case ownedHTTPS
+        case attemptCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sourceVersion = try values.decode(String.self, forKey: .sourceVersion)
+        sourceBuild = try values.decode(String.self, forKey: .sourceBuild)
+        targetVersion = try values.decode(String.self, forKey: .targetVersion)
+        targetBuild = try values.decode(String.self, forKey: .targetBuild)
+        applicationURL = try values.decode(URL.self, forKey: .applicationURL)
+        ownedHTTP = try values.decode(Bool.self, forKey: .ownedHTTP)
+        ownedHTTPS = try values.decode(Bool.self, forKey: .ownedHTTPS)
+        attemptCount = try values.decodeIfPresent(Int.self, forKey: .attemptCount) ?? 0
+    }
+}
+
+@MainActor
+protocol HandlerRestorationScheduling {
+    func schedule(after delay: Duration, _ operation: @escaping @MainActor () -> Void)
+}
+
+@MainActor
+private final class MainActorHandlerRestorationScheduler: HandlerRestorationScheduling {
+    func schedule(after delay: Duration, _ operation: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            operation()
+        }
+    }
 }
 
 @MainActor
@@ -67,6 +126,7 @@ enum HandlerPreservationRestorationDisposition: Equatable {
     case restored
     case registrationFailed
     case verificationFailed
+    case exhausted
 }
 
 struct HandlerPreservationRestorationSummary: Equatable {
@@ -85,6 +145,7 @@ final class HandlerPreservationController: HandlerPreservationManaging {
     private let bundleIdentifier: String?
     private let currentVersion: String
     private let currentBuild: String
+    private let restorationScheduler: HandlerRestorationScheduling
     private var restorationOperation: HandlerPreservationRestorationOperation?
 
     convenience init() {
@@ -94,7 +155,27 @@ final class HandlerPreservationController: HandlerPreservationManaging {
             applicationURL: Bundle.main.bundleURL,
             bundleIdentifier: Bundle.main.bundleIdentifier,
             currentVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-            currentBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            currentBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+            restorationScheduler: MainActorHandlerRestorationScheduler()
+        )
+    }
+
+    convenience init(
+        workspace: DefaultBrowserWorkspace?,
+        recordStore: HandlerPreservationRecordStoring,
+        applicationURL: URL,
+        bundleIdentifier: String?,
+        currentVersion: String?,
+        currentBuild: String?
+    ) {
+        self.init(
+            workspace: workspace,
+            recordStore: recordStore,
+            applicationURL: applicationURL,
+            bundleIdentifier: bundleIdentifier,
+            currentVersion: currentVersion,
+            currentBuild: currentBuild,
+            restorationScheduler: MainActorHandlerRestorationScheduler()
         )
     }
 
@@ -104,7 +185,8 @@ final class HandlerPreservationController: HandlerPreservationManaging {
         applicationURL: URL,
         bundleIdentifier: String?,
         currentVersion: String?,
-        currentBuild: String?
+        currentBuild: String?,
+        restorationScheduler: HandlerRestorationScheduling
     ) {
         self.workspace = workspace ?? NSWorkspaceDefaultBrowserWorkspace()
         self.recordStore = recordStore
@@ -112,6 +194,7 @@ final class HandlerPreservationController: HandlerPreservationManaging {
         self.bundleIdentifier = bundleIdentifier
         self.currentVersion = currentVersion ?? ""
         self.currentBuild = currentBuild ?? ""
+        self.restorationScheduler = restorationScheduler
     }
 
     func snapshotBeforeInstallation(targetVersion: String, targetBuild: String) {
@@ -123,12 +206,18 @@ final class HandlerPreservationController: HandlerPreservationManaging {
                 targetBuild: targetBuild,
                 applicationURL: applicationURL,
                 ownedHTTP: isCurrentApplicationDefault(forScheme: "http"),
-                ownedHTTPS: isCurrentApplicationDefault(forScheme: "https")
+                ownedHTTPS: isCurrentApplicationDefault(forScheme: "https"),
+                attemptCount: 0
             )
         )
     }
 
     func restoreIfNeeded(completion: @escaping (HandlerPreservationRestorationSummary) -> Void) {
+        guard restorationOperation == nil else {
+            completion(.init(disposition: .gated, http: .notAttempted, https: .notAttempted))
+            return
+        }
+
         guard let record = recordStore.load() else {
             completion(.init(disposition: .noPendingRecord, http: .notAttempted, https: .notAttempted))
             return
@@ -136,8 +225,7 @@ final class HandlerPreservationController: HandlerPreservationManaging {
 
         // A source build can launch again while Sparkle is waiting to install on quit, and a
         // different copy may launch first. Both cases stay inert so only the recorded bundle
-        // location can consume this record. There is no retry loop: the exact target launch
-        // consumes the record before at most one restoration attempt.
+        // location can consume this record.
         guard bundleIdentifier == Self.linkGateBundleIdentifier,
               ApplicationBundleIdentity.refersToSameApplication(record.applicationURL, applicationURL)
         else {
@@ -155,14 +243,24 @@ final class HandlerPreservationController: HandlerPreservationManaging {
             return
         }
 
-        // Consume at the exact target launch before changing Launch Services so this one-shot
-        // state can never reset defaults again on a later ordinary launch.
-        recordStore.remove()
+        guard (0...HandlerPreservationRestorationOperation.maximumAttempts).contains(record.attemptCount) else {
+            recordStore.remove()
+            completion(.init(disposition: .gated, http: .notAttempted, https: .notAttempted))
+            return
+        }
+
+        guard record.attemptCount < HandlerPreservationRestorationOperation.maximumAttempts else {
+            recordStore.remove()
+            completion(Self.exhaustedSummary(for: record))
+            return
+        }
+
         let operation = HandlerPreservationRestorationOperation(
             workspace: workspace,
+            recordStore: recordStore,
+            record: record,
             applicationURL: applicationURL,
-            ownedHTTP: record.ownedHTTP,
-            ownedHTTPS: record.ownedHTTPS,
+            scheduler: restorationScheduler,
             isCurrentApplicationDefault: { [weak self] scheme in
                 self?.isCurrentApplicationDefault(forScheme: scheme) ?? false
             },
@@ -173,6 +271,14 @@ final class HandlerPreservationController: HandlerPreservationManaging {
         )
         restorationOperation = operation
         operation.start()
+    }
+
+    private static func exhaustedSummary(for record: HandlerPreservationRecord) -> HandlerPreservationRestorationSummary {
+        .init(
+            disposition: .exhausted,
+            http: record.ownedHTTP ? .verificationFailed : .notOwnedBeforeUpdate,
+            https: record.ownedHTTPS ? .verificationFailed : .notOwnedBeforeUpdate
+        )
     }
 
     private func isCurrentApplicationDefault(forScheme scheme: String) -> Bool {
@@ -187,39 +293,86 @@ final class HandlerPreservationController: HandlerPreservationManaging {
 
 @MainActor
 private final class HandlerPreservationRestorationOperation {
+    static let maximumAttempts = 3
+    private static let retryDelays: [Duration] = [.milliseconds(250), .milliseconds(500), .seconds(1)]
+
     private let workspace: DefaultBrowserWorkspace
+    private let recordStore: HandlerPreservationRecordStoring
     private let applicationURL: URL
-    private let ownedSchemes: [String: Bool]
+    private let scheduler: HandlerRestorationScheduling
     private let isCurrentApplicationDefault: (String) -> Bool
     private let completion: (HandlerPreservationRestorationSummary) -> Void
+    private var record: HandlerPreservationRecord
     private var results: [String: HandlerPreservationSchemeResult] = [:]
+    private var verifiedSchemes = Set<String>()
     private var schemesToRestore: [String] = []
     private var nextSchemeIndex = 0
 
     init(
         workspace: DefaultBrowserWorkspace,
+        recordStore: HandlerPreservationRecordStoring,
+        record: HandlerPreservationRecord,
         applicationURL: URL,
-        ownedHTTP: Bool,
-        ownedHTTPS: Bool,
+        scheduler: HandlerRestorationScheduling,
         isCurrentApplicationDefault: @escaping (String) -> Bool,
         completion: @escaping (HandlerPreservationRestorationSummary) -> Void
     ) {
         self.workspace = workspace
+        self.recordStore = recordStore
+        self.record = record
         self.applicationURL = applicationURL
-        ownedSchemes = ["http": ownedHTTP, "https": ownedHTTPS]
+        self.scheduler = scheduler
         self.isCurrentApplicationDefault = isCurrentApplicationDefault
         self.completion = completion
     }
 
     func start() {
+        scheduleNextAttempt()
+    }
+
+    private func scheduleNextAttempt() {
+        guard record.attemptCount < Self.maximumAttempts else {
+            finishExhausted()
+            return
+        }
+        let delay = Self.retryDelays[record.attemptCount]
+        scheduler.schedule(after: delay) { [weak self] in
+            self?.beginAttempt()
+        }
+    }
+
+    private func beginAttempt() {
+        guard record.attemptCount < Self.maximumAttempts else {
+            finishExhausted()
+            return
+        }
+
+        record = HandlerPreservationRecord(
+            sourceVersion: record.sourceVersion,
+            sourceBuild: record.sourceBuild,
+            targetVersion: record.targetVersion,
+            targetBuild: record.targetBuild,
+            applicationURL: record.applicationURL,
+            ownedHTTP: record.ownedHTTP,
+            ownedHTTPS: record.ownedHTTPS,
+            attemptCount: record.attemptCount + 1
+        )
+        recordStore.save(record)
+        schemesToRestore = []
+        nextSchemeIndex = 0
+
         for scheme in ["http", "https"] {
-            guard ownedSchemes[scheme] == true else {
+            guard owns(scheme) else {
                 results[scheme] = .notOwnedBeforeUpdate
                 continue
             }
             if isCurrentApplicationDefault(scheme) {
-                results[scheme] = .alreadyOwnedByCurrentApplication
+                if results[scheme] == nil || results[scheme] == .registrationFailed || results[scheme] == .verificationFailed {
+                    results[scheme] = .alreadyOwnedByCurrentApplication
+                }
+                verifiedSchemes.insert(scheme)
             } else {
+                verifiedSchemes.remove(scheme)
                 schemesToRestore.append(scheme)
             }
         }
@@ -239,6 +392,7 @@ private final class HandlerPreservationRestorationOperation {
                 self.results[scheme] = .registrationFailed
             } else if self.isCurrentApplicationDefault(scheme) {
                 self.results[scheme] = .restored
+                self.verifiedSchemes.insert(scheme)
             } else {
                 self.results[scheme] = .verificationFailed
             }
@@ -247,6 +401,11 @@ private final class HandlerPreservationRestorationOperation {
     }
 
     private func finish() {
+        guard allOwnedSchemesVerified else {
+            scheduleNextAttempt()
+            return
+        }
+        recordStore.remove()
         let http = results["http"] ?? .notAttempted
         let https = results["https"] ?? .notAttempted
         let disposition: HandlerPreservationRestorationDisposition
@@ -260,5 +419,29 @@ private final class HandlerPreservationRestorationOperation {
             disposition = .alreadyPreservedOrNotOwned
         }
         completion(.init(disposition: disposition, http: http, https: https))
+    }
+
+    private func finishExhausted() {
+        recordStore.remove()
+        let http = resultForExhaustion(scheme: "http")
+        let https = resultForExhaustion(scheme: "https")
+        completion(.init(disposition: .exhausted, http: http, https: https))
+    }
+
+    private func owns(_ scheme: String) -> Bool {
+        switch scheme {
+        case "http": record.ownedHTTP
+        case "https": record.ownedHTTPS
+        default: false
+        }
+    }
+
+    private var allOwnedSchemesVerified: Bool {
+        ["http", "https"].allSatisfy { !owns($0) || verifiedSchemes.contains($0) }
+    }
+
+    private func resultForExhaustion(scheme: String) -> HandlerPreservationSchemeResult {
+        guard owns(scheme) else { return .notOwnedBeforeUpdate }
+        return results[scheme] ?? .verificationFailed
     }
 }

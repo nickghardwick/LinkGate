@@ -16,6 +16,7 @@ protocol HandlerPreservationRestoring: AnyObject {
 final class UpdateController: NSObject, UpdateChecking, HandlerPreservationRestoring, SPUUpdaterDelegate {
     private let handlerPreservation: any HandlerPreservationManaging
     private var updater: SPUStandardUpdaterController!
+    private(set) var latestHandlerPreservationResult: HandlerPreservationRestorationSummary?
 
     override init() {
         handlerPreservation = HandlerPreservationController()
@@ -49,7 +50,9 @@ final class UpdateController: NSObject, UpdateChecking, HandlerPreservationResto
     }
 
     func restorePreservedHandlersIfNeeded() {
-        handlerPreservation.restoreIfNeeded { _ in }
+        handlerPreservation.restoreIfNeeded { [weak self] result in
+            self?.latestHandlerPreservationResult = result
+        }
     }
 
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {

@@ -166,6 +166,111 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         ])
     }
 
+    // Task 3 acceptance 3 and 7: every current eligible chooser candidate remains represented,
+    // even when Launch Services provides no usable bundle ID. Its fixed fallback label must not
+    // substitute an application name or path, and it must stay in BrowserOrdering chooser order.
+    func testSnapshotRepresentsNilAndBlankBrowserBundleIdentifiersWithSafeFixedLabels() throws {
+        let blankIdentifier = makeCandidate(
+            path: "/Applications/Blank Identifier Browser.app",
+            displayName: "Blank Identifier Private Browser",
+            bundleIdentifier: "  "
+        )
+        let identified = makeCandidate(
+            path: "/Applications/Identified Browser.app",
+            displayName: "Identified Browser",
+            bundleIdentifier: "org.example.identified"
+        )
+        let nilIdentifier = makeCandidate(
+            path: "/Users/alice/Library/Developer/Nil Identifier Browser.app",
+            displayName: "Nil Identifier Secret Browser",
+            bundleIdentifier: nil
+        )
+        let store = makeStore()
+        try store.saveBrowserOrder([
+            "path:\(blankIdentifier.applicationURL.path)",
+            "bundle:org.example.identified",
+            "path:\(nilIdentifier.applicationURL.path)",
+        ])
+        let discovery = FixedBrowserDiscovery(candidates: [identified, nilIdentifier, blankIdentifier])
+
+        let text = makeController(store: store, browserDiscovery: discovery).snapshot().renderedText
+        let browserSection = section(in: text, heading: "Browsers", endingBefore: "Routing")
+
+        XCTAssertEqual(
+            browserSection,
+            [
+                "Browsers",
+                "- Enabled (3):",
+                "  - unknown bundle identifier",
+                "  - org.example.identified",
+                "  - unknown bundle identifier",
+                "- Disabled detected: 0",
+            ]
+        )
+        assertDoesNotContain(text, anyOf: [
+            blankIdentifier.applicationURL.path,
+            nilIdentifier.applicationURL.path,
+            "Blank Identifier Private Browser",
+            "Nil Identifier Secret Browser",
+            "alice",
+            "path:/Applications",
+        ])
+    }
+
+    // Task 3 acceptance 3 and 7: ordering uses the full current chooser set before visibility is
+    // applied. A legacy bundle identity may select only the first same-ID copy, so filtering first
+    // would recalculate identities and incorrectly reorder (or hide) the surviving copy.
+    func testSnapshotOrdersBeforeFilteringDisabledLegacyDuplicateBundleIdentity() throws {
+        let firstSharedCopy = makeCandidate(
+            path: "/Applications/Shared Browser A.app",
+            displayName: "Disabled Shared Browser",
+            bundleIdentifier: "org.example.shared"
+        )
+        let secondSharedCopy = makeCandidate(
+            path: "/Users/alice/Library/Developer/Shared Browser B.app",
+            displayName: "Private Shared Browser",
+            bundleIdentifier: "org.example.shared"
+        )
+        let distinctBrowser = makeCandidate(
+            path: "/Applications/Distinct Browser.app",
+            displayName: "Distinct Browser",
+            bundleIdentifier: "org.example.distinct"
+        )
+        let store = makeStore()
+        try store.saveBrowserOrder([
+            "bundle:org.example.shared",
+            "bundle:org.example.distinct",
+        ])
+        try store.saveDisabledBrowserIdentifiers(["bundle:org.example.shared"])
+        let beforeData = try XCTUnwrap(defaults.data(forKey: storageKey))
+        let discovery = FixedBrowserDiscovery(
+            candidates: [firstSharedCopy, secondSharedCopy, distinctBrowser]
+        )
+
+        let text = makeController(store: store, browserDiscovery: discovery).snapshot().renderedText
+        let browserSection = section(in: text, heading: "Browsers", endingBefore: "Routing")
+
+        XCTAssertEqual(
+            browserSection,
+            [
+                "Browsers",
+                "- Enabled (2):",
+                "  - org.example.distinct",
+                "  - org.example.shared (Development copy)",
+                "- Disabled detected: 1",
+            ]
+        )
+        XCTAssertEqual(defaults.data(forKey: storageKey), beforeData)
+        assertDoesNotContain(text, anyOf: [
+            firstSharedCopy.applicationURL.path,
+            secondSharedCopy.applicationURL.path,
+            firstSharedCopy.displayName,
+            secondSharedCopy.displayName,
+            "alice",
+            "bundle:org.example.shared",
+        ])
+    }
+
     func testSnapshotRendersRuleCountOnlyAndStableUpdaterAndRestorationValues() throws {
         let store = makeStore()
         let firstRule = try store.create(
@@ -308,7 +413,7 @@ final class DiagnosticsSnapshotTests: XCTestCase {
         UserDefaultsRoutingRuleStore(userDefaults: defaults, storageKey: storageKey)
     }
 
-    private func makeCandidate(path: String, displayName: String, bundleIdentifier: String) -> ApplicationCandidate {
+    private func makeCandidate(path: String, displayName: String, bundleIdentifier: String?) -> ApplicationCandidate {
         ApplicationCandidate(
             applicationURL: URL(fileURLWithPath: path),
             displayName: displayName,
